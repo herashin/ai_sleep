@@ -1,0 +1,43 @@
+name: ai_sleep
+description: SleepVoice AI - 의료 상담 녹음 및 요약 앱
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ">=2.18.0 <3.0.0"    # ← environment 아래에 두 칸 들여쓰기
+
+dependencies:
+  flutter:
+    sdk: flutter            # ← dependencies → flutter 아래에 더 들어쓰기
+  cupertino_icons: ^1.0.2
+  flutter_dotenv: ^5.1.0
+  permission_handler: ^11.0.1
+  path_provider: ^2.1.2
+  flutter_sound: ^9.2.13+1
+  http: ^1.1.0
+  provider: ^6.1.2
+  google_fonts: ^6.1.0
+  flutter_animate: ^4.3.0
+  iconsax: ^0.0.8
+  sqflite: ^2.3.0
+  share_plus: ^7.2.1
+  fluttertoast: ^8.2.12
+  pdf: ^3.10.4
+  printing: ^5.12.0
+  flutter_secure_storage: ^9.0.0
+  local_auth: ^2.1.7
+  encrypt: ^5.0.1 
+  flutter_windowmanager_plus: ^1.0.1
+  web_socket_channel: ^2.4.0
+  speech_to_text: ^7.0.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^2.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - .env
+ 
