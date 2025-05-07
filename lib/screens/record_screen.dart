@@ -1,10 +1,6 @@
 // lib/screens/record_screen.dart
 
-import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:flutter_sound/flutter_sound.dart';
-import 'package:permission_handler/permission_handler.dart';
-import 'package:path_provider/path_provider.dart';
 import '../services/stt_service.dart';
 import '../services/gpt_service.dart';
 import 'result_screen.dart';
@@ -17,103 +13,92 @@ class RecordScreen extends StatefulWidget {
 }
 
 class _RecordScreenState extends State<RecordScreen> {
-  final FlutterSoundRecorder _recorder = FlutterSoundRecorder();
   final STTService _sttService = STTService();
   final GPTService _gptService = GPTService();
 
   bool _isRecording = false;
-  String? _filePath;
+  bool _isLoading = false;
+  String _recognizedText = '';
 
   @override
   void initState() {
     super.initState();
-    _initRecorder();
-  }
-
-  Future<void> _initRecorder() async {
-    // 1) 마이크 권한 요청
-    var status = await Permission.microphone.request();
-    if (!status.isGranted) {
-      throw RecordingPermissionException('Microphone permission not granted');
-    }
-    // 2) 레코더 오픈
-    await _recorder.openRecorder();
+    _sttService.init(); // 권한 요청 및 초기화
   }
 
   Future<void> _toggleRecording() async {
+    if (_isLoading) return;
+
     if (_isRecording) {
-      // ■ Stop
-      final String? path = await _recorder.stopRecorder();
-      setState(() => _isRecording = false);
+      // ■ Stop listening
+      await _sttService.stopListening();
+      setState(() {
+        _isRecording = false;
+        _recognizedText = _sttService.recognizedText; // 결과 복사
+      });
 
-      if (path == null) return;
-      _filePath = path;
+      // 인식된 텍스트가 없으면 종료
+      if (_recognizedText.isEmpty) return;
 
-      final file = File(path);
-      if (!file.existsSync()) return;
+      // ■ GPT 요약
+      setState(() => _isLoading = true);
+      final summary = await _gptService.summarizeText(_recognizedText);
+      setState(() => _isLoading = false);
 
-      // 1) STT 변환
-      final String? transcript = await _sttService.transcribe();
-      if (transcript == null) return;
-
-      // 2) GPT 요약
-      final String? summary = await _gptService.summarizeText(transcript);
-
-      // 3) 결과 화면으로 이동
+      // ■ 결과 화면 이동
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(
           builder: (_) => ResultScreen(
-            originalText: transcript,
-            summaryText: summary ?? '요약 실패',
+            originalText: _recognizedText,
+            summaryText: summary,
           ),
         ),
       );
     } else {
-      // ■ Start
-      final dir = await getApplicationDocumentsDirectory();
-      final path =
-          '${dir.path}/record_${DateTime.now().millisecondsSinceEpoch}.wav';
-
-      await _recorder.startRecorder(
-        toFile: path,
-        codec: Codec.pcm16WAV,
-        sampleRate: 16000,
-        numChannels: 1,
-      );
-
+      // ■ Start listening
       setState(() {
         _isRecording = true;
-        _filePath = path;
+        _recognizedText = '';
       });
+      await _sttService.startListening();
     }
   }
 
   @override
   void dispose() {
-    // 레코더 닫기
-    _recorder.closeRecorder();
+    _sttService.stopListening();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('진료 녹음')),
+      appBar: AppBar(title: const Text('진료 녹음 (네이티브 STT)')),
       body: Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(_isRecording ? Icons.mic : Icons.mic_none,
-                size: 80, color: Colors.teal),
+            Icon(
+              _isRecording ? Icons.mic : Icons.mic_none,
+              size: 80,
+              color: _isRecording ? Colors.red : Colors.grey,
+            ),
             const SizedBox(height: 20),
             ElevatedButton(
               onPressed: _toggleRecording,
-              child: Text(_isRecording ? '녹음 중지' : '녹음 시작'),
+              child: _isLoading
+                  ? const CircularProgressIndicator(
+                      valueColor: AlwaysStoppedAnimation(Colors.white),
+                    )
+                  : Text(_isRecording ? '인식 중지' : '인식 시작'),
             ),
-            if (_filePath != null) ...[
+            if (!_isRecording && _recognizedText.isNotEmpty) ...[
               const SizedBox(height: 20),
-              Text('파일 경로:\n$_filePath', textAlign: TextAlign.center),
+              Text(
+                '인식된 텍스트:\n$_recognizedText',
+                textAlign: TextAlign.center,
+              ),
             ],
           ],
         ),
