@@ -13,10 +13,10 @@ import 'result_screen.dart';
 class RecordScreen extends StatefulWidget {
   const RecordScreen({Key? key}) : super(key: key);
   @override
-  _RecordScreenState createState() => _RecordScreenState();
+  RecordScreenState createState() => RecordScreenState();
 }
 
-class _RecordScreenState extends State<RecordScreen> {
+class RecordScreenState extends State<RecordScreen> {
   final FlutterSoundRecorder _recorder = FlutterSoundRecorder();
   final STTService _sttService = STTService();
   final GPTService _gptService = GPTService();
@@ -70,6 +70,19 @@ class _RecordScreenState extends State<RecordScreen> {
   Future<void> _toggleRecording() async {
     if (_isLoading || !_recorderReady) return;
 
+    // 마이크 권한이 거부된 상태라면 다시 요청
+    final micStatus = await Permission.microphone.status;
+    if (!micStatus.isGranted) {
+      final req = await Permission.microphone.request();
+      if (!req.isGranted) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('마이크 권한이 필요합니다.')),
+        );
+        return;
+      }
+    }
+
     if (_isRecording) {
       // ■ Stop recording
       _timer?.cancel();
@@ -94,15 +107,14 @@ class _RecordScreenState extends State<RecordScreen> {
                 .trim() ??
             'unknown';
 
-        // 새 파일명 생성
+        // 파일명 및 메타 저장
         final pubDir = Directory('/storage/emulated/0/AI_Sleep');
         if (!pubDir.existsSync()) pubDir.createSync(recursive: true);
         final baseName =
             'consult_${patientName}_${DateTime.now().millisecondsSinceEpoch}';
-        final newAudioPath = '${pubDir.path}/\$baseName.m4a';
-        final newMetaPath = '${pubDir.path}/\$baseName.json';
+        final newAudioPath = '${pubDir.path}/$baseName.m4a';
+        final newMetaPath = '${pubDir.path}/$baseName.json';
 
-        // 파일 및 메타 파일 리네임/저장
         await file.rename(newAudioPath);
         final meta = {
           'originalText': transcript,
@@ -112,6 +124,7 @@ class _RecordScreenState extends State<RecordScreen> {
         };
         await File(newMetaPath).writeAsString(jsonEncode(meta));
 
+        if (!mounted) return;
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(
@@ -123,8 +136,9 @@ class _RecordScreenState extends State<RecordScreen> {
           ),
         );
       } catch (e) {
+        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('STT/요약 오류: \$e')),
+          SnackBar(content: Text('STT/요약 오류: $e')),
         );
       } finally {
         setState(() => _isLoading = false);
@@ -133,6 +147,7 @@ class _RecordScreenState extends State<RecordScreen> {
       // ■ Start recording
       final ok = await _ensureManageExternalStorage();
       if (!ok) {
+        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('모든 파일 접근 권한이 필요합니다.')),
         );
@@ -169,8 +184,9 @@ class _RecordScreenState extends State<RecordScreen> {
         );
       } catch (e) {
         setState(() => _isRecording = false);
+        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('녹음 시작 실패: \$e')),
+          SnackBar(content: Text('녹음 시작 실패: $e')),
         );
       }
     }
@@ -197,11 +213,38 @@ class _RecordScreenState extends State<RecordScreen> {
               size: 80,
               color: _isRecording ? Colors.red : Colors.grey,
             ),
-            Text('녹음 시간: \${(_elapsedMs / 1000).toStringAsFixed(1)}초'),
+            Text('녹음 시간: ${(_elapsedMs / 1000).toStringAsFixed(1)}초'),
             const SizedBox(height: 20),
             ElevatedButton(
-              onPressed:
-                  (!_recorderReady || _isLoading) ? null : _toggleRecording,
+              onPressed: _isLoading
+                  ? null
+                  : () async {
+                      // 1) 마이크 권한 재요청
+                      final micStatus = await Permission.microphone.status;
+
+                      // 2) 영구 거부(permanentlyDenied) 상태면 설정 화면으로 이동
+                      if (micStatus.isPermanentlyDenied) {
+                        await openAppSettings();
+                        return;
+                      }
+                      // 3) 아직 허용 안 된 상태면 다시 요청
+                      if (!micStatus.isGranted) {
+                        final req = await Permission.microphone.request();
+                        if (!req.isGranted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('마이크 권한이 필요합니다.')),
+                          );
+                          return;
+                        }
+                      }
+                      // 4) 녹음기 초기화가 안 됐다면 초기화 실행
+                      if (!_recorderReady) {
+                        await _initRecorder();
+                        if (!_recorderReady) return; // 여전히 권한 없으면 중단
+                      }
+                      // 5) 녹음 토글
+                      await _toggleRecording();
+                    },
               child: _isLoading
                   ? const SizedBox(
                       width: 24,
@@ -212,7 +255,7 @@ class _RecordScreenState extends State<RecordScreen> {
             ),
             if (_filePath != null) ...[
               const SizedBox(height: 12),
-              Text('파일 저장: \$_filePath', textAlign: TextAlign.center),
+              Text('파일 저장: $_filePath', textAlign: TextAlign.center),
             ],
           ],
         ),
