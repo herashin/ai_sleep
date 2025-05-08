@@ -1,54 +1,25 @@
 // lib/services/stt_service.dart
 
-import 'package:permission_handler/permission_handler.dart';
-import 'package:speech_to_text/speech_to_text.dart';
+import 'dart:convert';
+import 'dart:io';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:http/http.dart' as http;
 
-/// 네이티브 음성인식을 래핑한 STT 서비스
 class STTService {
-  final SpeechToText _speech = SpeechToText();
-  bool _initialized = false;
+  final String _apiKey = dotenv.env['OPENAI_API_KEY']!;
 
-  /// 인식된 텍스트를 저장
-  String recognizedText = '';
-
-  /// 초기화: 권한 요청 및 엔진 초기화
-  Future init() async {
-// 1) 마이크 퍼미션 요청
-    final status = await Permission.microphone.request();
-    if (!status.isGranted) {
-      print('🔒 마이크 권한 거부됨');
-      return false;
-    }
-// 2) STT 엔진 초기화
-    _initialized = await _speech.initialize(
-      onStatus: (s) => print('STT status: $s'),
-      onError: (e) => print('STT error: $e'),
-    );
-    return _initialized;
-  }
-
-  /// 녹음(인식) 시작
-  Future startListening() async {
-    if (!_initialized && !await init()) return;
-    recognizedText = '';
-    await _speech.listen(
-      onResult: (result) {
-        if (result.recognizedWords.isNotEmpty) {
-          recognizedText = result.recognizedWords;
-        }
-      },
-      localeId: 'ko_KR',
-      listenMode: ListenMode.dictation,
-    );
-  }
-
-  /// 녹음(인식) 중지
-  Future stopListening() async {
-    if (_speech.isListening) {
-      await _speech.stop();
+  Future<String?> transcribeAudio(File audioFile) async {
+    final uri = Uri.parse('https://api.openai.com/v1/audio/transcriptions');
+    final req = http.MultipartRequest('POST', uri)
+      ..headers['Authorization'] = 'Bearer $_apiKey'
+      ..fields['model'] = 'whisper-1'
+      ..files.add(await http.MultipartFile.fromPath('file', audioFile.path));
+    final resp = await http.Response.fromStream(await req.send());
+    if (resp.statusCode == 200) {
+      return json.decode(resp.body)['text'] as String;
+    } else {
+      print('STT 오류 ${resp.statusCode}: ${resp.body}');
+      return null;
     }
   }
-
-  /// (옵션) 강제 중지 alias
-  Future stop() => stopListening();
 }
