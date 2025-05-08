@@ -1,4 +1,3 @@
-// GPT summarization
 // lib/services/gpt_service.dart
 
 import 'dart:convert';
@@ -52,6 +51,47 @@ $inputText
       return null;
     } catch (e) {
       print('GPT 호출 예외: $e');
+      return null;
+    }
+  }
+
+  /// STT 텍스트를 입력 받아 환자 이름만 추출해서 반환
+  Future<String?> extractPatientName(String inputText) async {
+    try {
+      final uri = Uri.parse('https://api.openai.com/v1/chat/completions');
+      final headers = {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer $_apiKey',
+      };
+      final body = json.encode({
+        'model': 'gpt-4',
+        'messages': [
+          {
+            'role': 'user',
+            'content': '''
+다음은 환자와 의료진의 상담 대화입니다.
+---
+$inputText
+---
+이 대화에서 환자의 이름만 **오직 한 줄**로 출력해주세요.
+다른 설명은 전혀 하지 말고, 예: 홍길동
+'''
+          }
+        ],
+        'temperature': 0.0,
+      });
+
+      final response = await http.post(uri, headers: headers, body: body);
+      if (response.statusCode == 200) {
+        final data = json.decode(utf8.decode(response.bodyBytes))
+            as Map<String, dynamic>;
+        // 응답 텍스트에서 불필요한 공백 제거
+        return (data['choices'][0]['message']['content'] as String).trim();
+      }
+      print('PatientName API 오류: ${response.statusCode}');
+      return null;
+    } catch (e) {
+      print('PatientName 호출 예외: $e');
       return null;
     }
   }

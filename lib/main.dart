@@ -13,6 +13,10 @@ Future<void> main() async {
   runApp(const SleepVoiceApp());
 }
 
+final Color symbolColor = Color(
+  int.parse(dotenv.env['SIMBOL_COLOR']!),
+);
+
 class SleepVoiceApp extends StatelessWidget {
   const SleepVoiceApp({super.key});
 
@@ -26,9 +30,9 @@ class SleepVoiceApp extends StatelessWidget {
         primarySwatch: Colors.teal,
         textTheme: GoogleFonts.notoSansKrTextTheme(),
         scaffoldBackgroundColor: Colors.grey[50],
-        appBarTheme: const AppBarTheme(
+        appBarTheme: AppBarTheme(
           centerTitle: true,
-          backgroundColor: Colors.teal,
+          backgroundColor: symbolColor,
           foregroundColor: Colors.white,
         ),
         elevatedButtonTheme: ElevatedButtonThemeData(

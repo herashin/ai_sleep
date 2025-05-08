@@ -1,11 +1,11 @@
 // lib/screens/record_screen.dart
 
+import 'dart:convert';
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_sound/flutter_sound.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:path_provider/path_provider.dart';
 import '../services/stt_service.dart'; // Whisper용
 import '../services/gpt_service.dart';
 import 'result_screen.dart';
@@ -35,13 +35,11 @@ class _RecordScreenState extends State<RecordScreen> {
   }
 
   Future<void> _initRecorder() async {
-    // 마이크 권한 요청
     final micStatus = await Permission.microphone.request();
     if (!micStatus.isGranted) {
       _showPermissionDeniedSnackBar();
       return;
     }
-    // 녹음기 초기화
     await _recorder.openRecorder();
     _recorder.setSubscriptionDuration(const Duration(milliseconds: 100));
     _recorder.onProgress!.listen((event) {
@@ -75,46 +73,64 @@ class _RecordScreenState extends State<RecordScreen> {
     if (_isRecording) {
       // ■ Stop recording
       _timer?.cancel();
-      final path = await _recorder.stopRecorder();
+      final tempPath = await _recorder.stopRecorder();
       await Future.delayed(const Duration(milliseconds: 100));
-      if (path == null) return;
-      final file = File(path);
+      if (tempPath == null) return;
+      final file = File(tempPath);
       if (!file.existsSync()) return;
 
-      final bytes = file.lengthSync();
-      final estimatedSec = bytes / 32000;
       setState(() {
         _isRecording = false;
-        _filePath = path;
+        _filePath = tempPath;
       });
-      if (estimatedSec < 0.1) return;
 
       setState(() => _isLoading = true);
       try {
-        final transcript = await _sttService.transcribeAudio(File(path));
-        if (transcript != null) {
-          final summary = await _gptService.summarizeText(transcript);
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(
-              builder: (_) => ResultScreen(
-                originalText: transcript,
-                summaryText: summary,
-                audioPath: path,
-              ),
+        final transcript = await _sttService.transcribeAudio(File(tempPath));
+        if (transcript == null) return;
+        final summary = await _gptService.summarizeText(transcript);
+        final patientName = (await _gptService.extractPatientName(transcript))
+                ?.replaceAll(RegExp(r'[^가-힣a-zA-Z0-9]'), '_')
+                .trim() ??
+            'unknown';
+
+        // 새 파일명 생성
+        final pubDir = Directory('/storage/emulated/0/AI_Sleep');
+        if (!pubDir.existsSync()) pubDir.createSync(recursive: true);
+        final baseName =
+            'consult_${patientName}_${DateTime.now().millisecondsSinceEpoch}';
+        final newAudioPath = '${pubDir.path}/\$baseName.m4a';
+        final newMetaPath = '${pubDir.path}/\$baseName.json';
+
+        // 파일 및 메타 파일 리네임/저장
+        await file.rename(newAudioPath);
+        final meta = {
+          'originalText': transcript,
+          'summaryText': summary,
+          'createdAt': DateTime.now().toIso8601String(),
+          'patientName': patientName,
+        };
+        await File(newMetaPath).writeAsString(jsonEncode(meta));
+
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => ResultScreen(
+              originalText: transcript,
+              summaryText: summary,
+              audioPath: newAudioPath,
             ),
-          );
-        }
+          ),
+        );
       } catch (e) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('STT/요약 오류: $e')),
+          SnackBar(content: Text('STT/요약 오류: \$e')),
         );
       } finally {
         setState(() => _isLoading = false);
       }
     } else {
       // ■ Start recording
-      // 외부 저장소 권한 보장 (Android11+)
       final ok = await _ensureManageExternalStorage();
       if (!ok) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -129,7 +145,6 @@ class _RecordScreenState extends State<RecordScreen> {
         _filePath = null;
       });
 
-      // 공용 외부 폴더 경로
       final pubDir = Directory('/storage/emulated/0/AI_Sleep');
       if (!pubDir.existsSync()) pubDir.createSync(recursive: true);
       final outPath =
@@ -155,7 +170,7 @@ class _RecordScreenState extends State<RecordScreen> {
       } catch (e) {
         setState(() => _isRecording = false);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('녹음 시작 실패: $e')),
+          SnackBar(content: Text('녹음 시작 실패: \$e')),
         );
       }
     }
@@ -182,7 +197,7 @@ class _RecordScreenState extends State<RecordScreen> {
               size: 80,
               color: _isRecording ? Colors.red : Colors.grey,
             ),
-            Text('녹음 시간: ${(_elapsedMs / 1000).toStringAsFixed(1)}초'),
+            Text('녹음 시간: \${(_elapsedMs / 1000).toStringAsFixed(1)}초'),
             const SizedBox(height: 20),
             ElevatedButton(
               onPressed:
@@ -197,7 +212,7 @@ class _RecordScreenState extends State<RecordScreen> {
             ),
             if (_filePath != null) ...[
               const SizedBox(height: 12),
-              Text('파일 저장: $_filePath', textAlign: TextAlign.center),
+              Text('파일 저장: \$_filePath', textAlign: TextAlign.center),
             ],
           ],
         ),
