@@ -23,13 +23,14 @@ class RecordingListScreen extends StatelessWidget {
       if (f is File && f.path.endsWith('.m4a')) {
         final metaPath = f.path.replaceAll('.m4a', '.json');
         if (await File(metaPath).exists()) {
-          final meta = jsonDecode(await File(metaPath).readAsString());
+          final meta = jsonDecode(await File(metaPath).readAsString())
+              as Map<String, dynamic>;
           recs.add(Recording(
             audioPath: f.path,
             originalText: meta['originalText'] as String,
             summaryText: meta['summaryText'] as String,
             createdAt: DateTime.parse(meta['createdAt'] as String),
-            patientName: meta['patientName'] ?? '알 수 없음',
+            patientName: meta['patientName'] as String? ?? '알 수 없음',
           ));
         }
       }
@@ -60,7 +61,6 @@ class RecordingListScreen extends StatelessWidget {
               final rec = recordings[i];
               final timeLabel =
                   DateFormat('yyyy.MM.dd HH:mm').format(rec.createdAt);
-              //  final preview = rec.summaryText.split('\n').first;
               final title = '${rec.patientName} 환자 진료상담 요약';
               return Card(
                 margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -77,6 +77,7 @@ class RecordingListScreen extends StatelessWidget {
                         originalText: rec.originalText,
                         summaryText: rec.summaryText,
                         audioPath: rec.audioPath,
+                        patientName: rec.patientName, // 환자명 전달
                       ),
                     ),
                   ),

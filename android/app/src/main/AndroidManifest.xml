@@ -14,14 +14,27 @@
     <!-- Android 11 이상: 모든 파일 액세스 -->
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"/>
 
-    <!-- Android 13 이상: 미디어(오디오) 읽기 -->
+    <!-- Android 13 이상: 파일 및 미디어 읽기 -->
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO"/>
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES"/>
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO"/>
+
+
+
+    
 
     <!-- Flutter TEXT 처리용 쿼리 -->
     <queries>
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
+        </intent>
+   
+
+     <!-- PDF 공유용 인텐트 쿼리 추가 -->
+        <intent>
+            <action android:name="android.intent.action.SEND"/>
+            <data android:mimeType="application/pdf"/>
         </intent>
     </queries>
 

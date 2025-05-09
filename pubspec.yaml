@@ -4,14 +4,14 @@ publish_to: 'none'
 version: 1.0.0+1
 
 environment:
-  sdk: ">=2.18.0 <3.0.0"    # ← environment 아래에 두 칸 들여쓰기
+  sdk: ">=2.18.0 <4.0.0"    # ← environment 아래에 두 칸 들여쓰기
 
 dependencies:
   flutter:
     sdk: flutter            # ← dependencies → flutter 아래에 더 들어쓰기
   cupertino_icons: ^1.0.2
   flutter_dotenv: ^5.1.0
-  permission_handler: ^11.0.1
+  permission_handler: ^12.0.0+1
   path_provider: ^2.1.2
   flutter_sound: ^9.28.0 
   http: ^1.1.0
@@ -31,7 +31,11 @@ dependencies:
   web_socket_channel: ^2.4.0
   speech_to_text: ^7.0.0
   intl: ^0.17.0
-
+  device_info_plus: ^11.4.0
+  
+dependency_overrides:
+  # Android 플랫폼용 permission_handler 패키지를 최신으로 강제 지정
+  permission_handler_android: ^13.0.1
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -39,6 +43,9 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  
   assets:
     - .env
-  
+    - assets/fonts/NotoSansKR-VariableFont_wght.ttf
+    - assets/fonts/NotoColorEmoji-Regular.ttf
+   
