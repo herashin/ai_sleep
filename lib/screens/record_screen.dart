@@ -5,13 +5,17 @@ import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_sound/flutter_sound.dart';
-import '../widgets/permission_gate.dart'; // PermissionGate import
+import '../widgets/permission_gate.dart';
 import '../services/stt_service.dart';
 import '../services/gpt_service.dart';
+import '../models/recording.dart';
+import '../models/summary_item.dart'; // ← 추가
 import 'result_screen.dart';
+import '../services/emoji_assets.dart';
 
 class RecordScreen extends StatefulWidget {
   const RecordScreen({Key? key}) : super(key: key);
+
   @override
   RecordScreenState createState() => RecordScreenState();
 }
@@ -34,16 +38,16 @@ class RecordScreenState extends State<RecordScreen> {
     _initRecorder();
   }
 
-  Future<void> _initRecorder() async {
+  Future _initRecorder() async {
     await _recorder.openRecorder();
     _recorder.setSubscriptionDuration(const Duration(milliseconds: 100));
-    _recorder.onProgress!.listen((event) {
+    _recorder.onProgress?.listen((event) {
       if (mounted) setState(() => _elapsedMs = event.duration.inMilliseconds);
     });
     setState(() => _recorderReady = true);
   }
 
-  Future<void> _toggleRecording() async {
+  Future _toggleRecording() async {
     if (_isLoading || !_recorderReady) return;
 
     if (_isRecording) {
@@ -51,6 +55,7 @@ class RecordScreenState extends State<RecordScreen> {
       final tempPath = await _recorder.stopRecorder();
       await Future.delayed(const Duration(milliseconds: 100));
       if (tempPath == null) return;
+
       final file = File(tempPath);
       if (!file.existsSync()) return;
 
@@ -61,22 +66,25 @@ class RecordScreenState extends State<RecordScreen> {
 
       setState(() => _isLoading = true);
       try {
-        // 1) STT 변환
-        final transcript = await _sttService.transcribeAudio(File(tempPath));
-        if (transcript == null) throw Exception('음성 인식에 실패했습니다.');
-        // 2) 요약
-        final summaryNullable = await _gptService.summarizeText(transcript);
-        if (summaryNullable == null) throw Exception('AI 요약에 실패했습니다.');
-        final summary = summaryNullable;
-        // 3) 환자명 추출
-        final patientNameNullable =
-            await _gptService.extractPatientName(transcript);
-        final patientName = (patientNameNullable
-                ?.replaceAll(RegExp(r'[^가-힣a-zA-Z0-9]'), '_')
-                .trim()) ??
-            'unknown';
+        // 1) STT
+        final rawTranscript = await _sttService.transcribeAudio(file);
+        if (rawTranscript == null) throw Exception('음성 인식에 실패했습니다.');
 
-        // 파일 저장 준비 및 이동
+        // 2) GPT 요약 + 아이콘
+        final result = await _gptService.reviseAndSummarize(rawTranscript);
+        final cleanedTranscript = result.cleanedText;
+        final summary = result.summary; // 요약 텍스트(String)
+        final summaryIcons = result.summaryIcons; // 아이콘 키(List<String>)
+
+        if (summary.isEmpty) throw Exception('GPT 요약에 실패했습니다.');
+
+        // 3) 환자명 추출
+        final nameRaw = await _gptService.extractPatientName(cleanedTranscript);
+        final patientName =
+            (nameRaw?.replaceAll(RegExp(r'[^가-힣a-zA-Z0-9]'), '_').trim()) ??
+                'unknown';
+
+        // 4) 파일 이동 및 메타 저장 준비
         final pubDir = Directory('/storage/emulated/0/AI_Sleep');
         if (!pubDir.existsSync()) pubDir.createSync(recursive: true);
         final baseName =
@@ -85,24 +93,38 @@ class RecordScreenState extends State<RecordScreen> {
         final newMetaPath = '${pubDir.path}/$baseName.json';
         await file.rename(newAudioPath);
 
-        final meta = {
-          'originalText': transcript,
-          'summaryText': summary,
-          'createdAt': DateTime.now().toIso8601String(),
-          'patientName': patientName,
-        };
-        await File(newMetaPath).writeAsString(jsonEncode(meta));
+        // 5) SummaryItem 리스트 생성
+        final lines =
+            summary.split('\n').where((l) => l.trim().isNotEmpty).toList();
+        final summaryItems = List<SummaryItem>.generate(
+          summaryIcons.length,
+          (i) => SummaryItem(
+            iconCode: summaryIcons[i],
+            text: i < lines.length ? lines[i] : '',
+          ),
+        );
 
+        // 6) Recording 객체 생성 (모델에도 summaryItems 필드 추가 필요)
+        final recording = Recording(
+          audioPath: newAudioPath,
+          originalText: cleanedTranscript,
+          summaryItems: summaryItems, // 새로운 필드
+          createdAt: DateTime.now(),
+          patientName: patientName,
+        );
+
+        // 7) 메타 JSON 저장
+        await File(newMetaPath).writeAsString(
+          jsonEncode(recording.toJson()),
+          encoding: utf8,
+        );
+
+        // 8) 결과 화면으로 이동
         if (!mounted) return;
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(
-            builder: (_) => ResultScreen(
-              originalText: transcript,
-              summaryText: summary,
-              audioPath: newAudioPath,
-              patientName: patientName,
-            ),
+            builder: (_) => ResultScreen(recording: recording),
           ),
         );
       } catch (e) {
@@ -115,6 +137,7 @@ class RecordScreenState extends State<RecordScreen> {
         if (mounted) setState(() => _isLoading = false);
       }
     } else {
+      // 녹음 시작
       setState(() {
         _isRecording = true;
         _elapsedMs = 0;
@@ -142,10 +165,11 @@ class RecordScreenState extends State<RecordScreen> {
         });
       } catch (e) {
         setState(() => _isRecording = false);
-        if (mounted)
+        if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text('녹음 시작 실패: ${e.toString()}')),
           );
+        }
       }
     }
   }

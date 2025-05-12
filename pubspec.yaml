@@ -4,7 +4,7 @@ publish_to: 'none'
 version: 1.0.0+1
 
 environment:
-  sdk: ">=2.18.0 <4.0.0"    # ← environment 아래에 두 칸 들여쓰기
+  sdk: ">=3.0.0 <4.0.0"    # ← environment 아래에 두 칸 들여쓰기
 
 dependencies:
   flutter:
@@ -32,6 +32,7 @@ dependencies:
   speech_to_text: ^7.0.0
   intl: ^0.17.0
   device_info_plus: ^11.4.0
+  flutter_svg: ^2.1.0
   
 dependency_overrides:
   # Android 플랫폼용 permission_handler 패키지를 최신으로 강제 지정
@@ -48,4 +49,10 @@ flutter:
     - .env
     - assets/fonts/NotoSansKR-VariableFont_wght.ttf
     - assets/fonts/NotoColorEmoji-Regular.ttf
-   
+    - assets/emojis/1f4cb.svg
+    - assets/emojis/1f464.svg
+    - assets/emojis/270f.svg
+    - assets/emojis/1f9b7.svg
+    - assets/emojis/1f4dd.svg
+    - assets/emojis/1f4b0.svg
+    - assets/emojis/1f5d3.svg
