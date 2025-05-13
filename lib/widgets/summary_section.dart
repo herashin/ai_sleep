@@ -20,6 +20,11 @@ class SummarySection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final defaultStyle = Theme.of(context).textTheme.bodyMedium;
+
+    if (items.isEmpty) {
+      return const Text('요약 정보가 없습니다.',
+          style: TextStyle(fontSize: 14, color: Colors.grey));
+    }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: items.map((item) {
@@ -28,12 +33,13 @@ class SummarySection extends StatelessWidget {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // 비동기 없이 바로 SVG asset 로드
-              EmojiAssetManager.svgIcon(
-                item.iconCode,
-                width: iconSize,
-                height: iconSize,
-              ),
+              //비동기 없이 바로 SVG asset 로드
+              // EmojiAssetManager.svgIcon(
+              //   item.iconCode,
+              //   width: iconSize,
+              //   height: iconSize,
+              // ),
+              Icon(Icons.emoji_emotions, size: iconSize),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(

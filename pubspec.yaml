@@ -47,12 +47,5 @@ flutter:
   
   assets:
     - .env
-    - assets/fonts/NotoSansKR-VariableFont_wght.ttf
-    - assets/fonts/NotoColorEmoji-Regular.ttf
-    - assets/emojis/1f4cb.svg
-    - assets/emojis/1f464.svg
-    - assets/emojis/270f.svg
-    - assets/emojis/1f9b7.svg
-    - assets/emojis/1f4dd.svg
-    - assets/emojis/1f4b0.svg
-    - assets/emojis/1f5d3.svg
+    - assets/fonts/
+    - assets/emojis/

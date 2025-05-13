@@ -11,7 +11,7 @@ import '../widgets/permission_gate.dart';
 import '../widgets/summary_section.dart'; // ← SummarySection import
 import '../services/pdf_service.dart';
 import '../models/recording.dart';
-import 'recording_list_screen.dart';
+//import 'recording_list_screen.dart';
 
 class ResultScreen extends StatefulWidget {
   final Recording recording;
@@ -78,17 +78,50 @@ class ResultScreenState extends State<ResultScreen> {
   }
 
   void _togglePlay() async {
-    if (!_playerReady) return;
-    if (_isPlaying) {
-      await _player.stopPlayer();
-      setState(() => _isPlaying = false);
-    } else {
-      await _player.startPlayer(
-        fromURI: widget.recording.audioPath,
-        codec: Codec.aacMP4,
-        whenFinished: () => setState(() => _isPlaying = false),
+    debugPrint('🎯 재생 시도 파일 경로: ${widget.recording.audioPath}');
+
+    if (!_playerReady) {
+      debugPrint('🚨 플레이어가 준비되지 않았습니다.');
+      return;
+    }
+
+    final audioFile = File(widget.recording.audioPath);
+    bool exists = await audioFile.exists();
+
+    debugPrint('🎯 오디오 파일 존재 여부: $exists');
+
+    if (!exists) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('⚠️ 오디오 파일이 존재하지 않습니다!')),
       );
-      setState(() => _isPlaying = true);
+      return;
+    }
+
+    try {
+      if (_isPlaying) {
+        debugPrint('⏹️ 플레이어 정지 시도');
+        await _player.stopPlayer();
+        debugPrint('✅ 플레이어 정지 성공');
+        setState(() => _isPlaying = false);
+      } else {
+        debugPrint('▶️ 플레이어 시작 시도');
+        await _player.startPlayer(
+          fromURI: widget.recording.audioPath,
+          codec: Codec.aacMP4,
+          whenFinished: () {
+            debugPrint('🎵 오디오 재생 완료');
+            setState(() => _isPlaying = false);
+          },
+        );
+        debugPrint('✅ 플레이어 시작 성공');
+        setState(() => _isPlaying = true);
+      }
+    } catch (e, stackTrace) {
+      debugPrint('🚨 플레이어에서 예외 발생: $e');
+      debugPrint('🚨 스택 추적: $stackTrace');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('오디오 파일 재생 실패: $e')),
+      );
     }
   }
 
@@ -228,11 +261,12 @@ class ResultScreenState extends State<ResultScreen> {
                     icon: const Icon(Icons.list_alt),
                     label: const Text('녹음 목록'),
                     onPressed: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                            builder: (_) => const RecordingListScreen()),
-                      );
+                      //  Navigator.push(
+                      //   context,
+                      //   MaterialPageRoute(
+                      //       builder: (_) => const RecordingListScreen()),
+                      //  );
+                      Navigator.pop(context);
                     },
                   ),
                 ),

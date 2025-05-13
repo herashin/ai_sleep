@@ -3,66 +3,61 @@
 import 'package:flutter/foundation.dart';
 import 'summary_item.dart';
 
+/// 녹음 및 요약 결과 메타데이터 모델
 class Recording {
   final String audioPath;
-  final String originalText;
-  final List<SummaryItem> summaryItems; // 변경된 부분
-  final DateTime createdAt;
   final String patientName;
+  final String originalText;
+  final List<SummaryItem> summaryItems;
+  final DateTime createdAt;
 
   Recording({
     required this.audioPath,
+    required this.patientName,
     required this.originalText,
     required this.summaryItems,
     required this.createdAt,
-    required this.patientName,
   });
 
-  factory Recording.fromJson(Map<String, dynamic> json) {
-    // 1) audioPath, originalText, patientName: 누락 시 빈 문자열로 대체
-    final audioPath = json['audioPath']?.toString() ?? '';
-    final originalText = json['originalText']?.toString() ?? '';
-    final patientName = json['patientName']?.toString() ?? '';
-
-    // 2) createdAt: 파싱이 실패하면 현재 시간으로 대체
-    DateTime createdAt;
+  /// JSON → Recording 객체
+  factory Recording.fromJson(Map<String, dynamic> map) {
     try {
-      final rawDate = json['createdAt']?.toString() ?? '';
-      createdAt = DateTime.parse(rawDate);
-    } catch (_) {
-      createdAt = DateTime.now();
-    }
-
-    // 3) summaryItems: 리스트·맵 여부, 내부 필드 검사
-    final rawItems = json['summaryItems'];
-    final List<SummaryItem> safeItems = [];
-    if (rawItems is List) {
-      for (var e in rawItems) {
-        if (e is Map<String, dynamic>) {
-          final iconCode = e['iconCode']?.toString() ?? '';
-          final text = e['text']?.toString() ?? '';
-          safeItems.add(SummaryItem(iconCode: iconCode, text: text));
-        }
+      final createdAtStr = map['createdAt'] as String? ?? '';
+      final parsedDate = DateTime.tryParse(createdAtStr) ?? DateTime.now();
+      final rawItems = map['summaryItems'];
+      List<SummaryItem> items = [];
+      if (rawItems is List) {
+        items = rawItems
+            .whereType<Map<String, dynamic>>()
+            .map((e) => SummaryItem.fromJson(e))
+            .toList();
       }
-    }
-    // (null이거나 List가 아니면 빈 리스트)
 
-    return Recording(
-      audioPath: audioPath,
-      originalText: originalText,
-      summaryItems: safeItems,
-      createdAt: createdAt,
-      patientName: patientName,
-    );
+      final recording = Recording(
+        audioPath: map['audioPath'] as String? ?? '',
+        patientName: map['patientName'] as String? ?? 'unknown',
+        originalText: map['originalText'] as String? ?? '',
+        summaryItems: items,
+        createdAt: parsedDate,
+      );
+
+      debugPrint(
+          '✅ Recording.fromJson 성공: ${recording.patientName}, 아이템 수: ${items.length}');
+      return recording;
+    } catch (e, stack) {
+      debugPrint('🚨 Recording.fromJson 예외 발생: $e\nstack: $stack');
+      rethrow;
+    }
   }
 
-  Map<String, dynamic> toJson() => {
-        'audioPath': audioPath,
-        'originalText': originalText,
-        'summaryItems': summaryItems
-            .map((i) => {'iconCode': i.iconCode, 'text': i.text})
-            .toList(),
-        'createdAt': createdAt.toIso8601String(),
-        'patientName': patientName,
-      };
+  /// Recording 객체 → JSON
+  Map<String, dynamic> toJson() {
+    return {
+      'audioPath': audioPath,
+      'patientName': patientName,
+      'originalText': originalText,
+      'createdAt': createdAt.toIso8601String(),
+      'summaryItems': summaryItems.map((e) => e.toJson()).toList(),
+    };
+  }
 }

@@ -1,23 +1,59 @@
 // lib/screens/recording_list_screen.dart
 
-import 'dart:convert';
 import 'dart:io';
+import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 
-import '../widgets/permission_gate.dart';
+import '../widgets/recording_list_item.dart';
 import '../models/recording.dart';
-import '../widgets/summary_section.dart';
 import 'result_screen.dart';
+import 'package:flutter/foundation.dart';
+import 'package:permission_handler/permission_handler.dart';
+
+Future<bool> ensureManageStoragePermission() async {
+  // 먼저 권한 상태를 정확히 확인
+  final status = await Permission.manageExternalStorage.status;
+  if (status.isGranted) {
+    debugPrint('✅ 모든 파일 접근 권한이 이미 허용되어 있습니다.');
+    return true;
+  } else {
+    debugPrint('🚩 모든 파일 접근 권한을 요청합니다.');
+    final result = await Permission.manageExternalStorage.request();
+    debugPrint('✅ 권한 요청 결과: $result');
+    return result.isGranted;
+  }
+}
+
+// 이 함수는 꼭 클래스 외부에 최상위로 선언해야 합니다.
+Future<List<Recording>> fetchRecordingsFromDir(String dirPath) async {
+  final dir = Directory(dirPath);
+  if (!await dir.exists()) return [];
+
+  final recs = <Recording>[];
+  await for (final entity in dir.list()) {
+    if (entity is File && entity.path.endsWith('.json')) {
+      try {
+        final jsonString = await entity.readAsString(encoding: utf8);
+        final map = jsonDecode(jsonString) as Map<String, dynamic>;
+        recs.add(Recording.fromJson(map));
+      } catch (_) {
+        // 오류난 파일은 무시하고 계속 진행
+      }
+    }
+  }
+
+  recs.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+  return recs;
+}
 
 class RecordingListScreen extends StatefulWidget {
   const RecordingListScreen({Key? key}) : super(key: key);
 
   @override
-  _RecordingListScreenState createState() => _RecordingListScreenState();
+  RecordingListScreenState createState() => RecordingListScreenState();
 }
 
-class _RecordingListScreenState extends State<RecordingListScreen> {
+class RecordingListScreenState extends State<RecordingListScreen> {
   bool _loading = true;
   List<Recording> _recs = [];
   String? _error;
@@ -25,41 +61,31 @@ class _RecordingListScreenState extends State<RecordingListScreen> {
   @override
   void initState() {
     super.initState();
+    ensureManageStoragePermission();
+    debugPrint('▶▶▶ RecordingListScreen.initState()');
     _fetchRecordings();
   }
 
   Future<void> _fetchRecordings() async {
-    debugPrint('▶ _fetchRecordings start');
+    debugPrint('🚩 _fetchRecordings() 호출됨');
     try {
-      final dir = Directory('/storage/emulated/0/AI_Sleep');
-      if (!await dir.exists()) {
-        setState(() {
-          _recs = [];
-          _loading = false;
-        });
-        return;
-      }
+      final recs =
+          await compute(fetchRecordingsFromDir, '/storage/emulated/0/AI_Sleep');
+      debugPrint('✅ compute 완료, recordings 개수: ${recs.length}');
 
-      final recs = <Recording>[];
-      await for (final entity in dir.list()) {
-        if (entity is File && entity.path.endsWith('.json')) {
-          try {
-            final jsonString = await entity.readAsString(encoding: utf8);
-            final map = jsonDecode(jsonString) as Map<String, dynamic>;
-            recs.add(Recording.fromJson(map));
-          } catch (e) {
-            debugPrint('메타 파싱 실패: ${entity.path} → $e');
-          }
-        }
-      }
-      recs.sort((a, b) => b.createdAt.compareTo(a.createdAt));
-
+      if (!mounted) return;
       setState(() {
         _recs = recs;
         _loading = false;
       });
-      debugPrint('◀ _fetchRecordings end: total=${recs.length}');
-    } catch (e) {
+
+      for (final r in recs) {
+        debugPrint(
+            '📌 로드된 recording: ${r.patientName}, ${r.audioPath}, ${r.createdAt}, summaryItems 개수: ${r.summaryItems.length}');
+      }
+    } catch (e, stack) {
+      debugPrint('🚨 fetchRecordings 예외 발생: $e, stack: $stack');
+      if (!mounted) return;
       setState(() {
         _error = e.toString();
         _loading = false;
@@ -69,104 +95,32 @@ class _RecordingListScreenState extends State<RecordingListScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return PermissionGate(
-      requireMicrophone: false,
-      requireStorage: true,
-      child: Scaffold(
-        appBar: AppBar(title: const Text('녹음 기록 목록')),
-        body: Center(
-          child: _loading
-              ? const CircularProgressIndicator()
-              : _error != null
-                  ? Text('에러 발생: $_error')
-                  : _recs.isEmpty
-                      ? const Text('저장된 녹음이 없습니다.')
-                      : ListView.builder(
-                          itemCount: _recs.length,
-                          itemBuilder: (ctx, i) {
-                            final rec = _recs[i];
-                            debugPrint('▶ build item $i (${rec.patientName})');
-                            final timeLabel = DateFormat('yyyy.MM.dd HH:mm')
-                                .format(rec.createdAt);
-                            return Card(
-                              margin: const EdgeInsets.symmetric(
-                                  horizontal: 12, vertical: 6),
-                              child: InkWell(
-                                onTap: () => Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (_) =>
-                                        ResultScreen(recording: rec),
-                                  ),
-                                ),
-                                child: Padding(
-                                  padding: const EdgeInsets.all(12),
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Row(
-                                        mainAxisAlignment:
-                                            MainAxisAlignment.spaceBetween,
-                                        children: [
-                                          Row(
-                                            children: [
-                                              const Icon(
-                                                Icons.audiotrack,
-                                                color: Colors.teal,
-                                              ),
-                                              const SizedBox(width: 8),
-                                              Expanded(
-                                                child: Text(
-                                                  '${rec.patientName} 환자 진료상담 요약',
-                                                  maxLines: 1,
-                                                  overflow:
-                                                      TextOverflow.ellipsis,
-                                                  style: const TextStyle(
-                                                      fontWeight:
-                                                          FontWeight.bold),
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                          const Icon(Icons.chevron_right),
-                                        ],
-                                      ),
-                                      const SizedBox(height: 4),
-                                      Text(
-                                        timeLabel,
-                                        style: TextStyle(
-                                            color: Colors.grey.shade600,
-                                            fontSize: 12),
-                                      ),
-                                      const SizedBox(height: 8),
-                                      // 실제 요약 미리보기
-                                      // SummarySection(
-                                      //   items: rec.summaryItems.length > 3
-                                      //       ? rec.summaryItems.sublist(0, 3)
-                                      //       : rec.summaryItems,
-                                      //   iconSize: 16,
-                                      //   textStyle:
-                                      //       const TextStyle(fontSize: 12),
-                                      // ),
-                                      // SVG 로딩 빼고 단순 텍스트만 표시
-                                      Text(
-                                        rec.summaryItems
-                                            .map((e) => e.text)
-                                            .join('\n'),
-                                        maxLines: 3,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: const TextStyle(fontSize: 12),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            );
-                          },
-                        ),
-        ),
-      ),
+    debugPrint(
+        '▶▶▶ RecordingListScreen.build() [loading=$_loading, error=$_error, count=${_recs.length}]');
+    return Scaffold(
+      appBar: AppBar(title: const Text('녹음 기록 목록')),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : _error != null
+              ? Center(child: Text('에러 발생: $_error'))
+              : _recs.isEmpty
+                  ? const Center(child: Text('저장된 녹음이 없습니다.'))
+                  : ListView.builder(
+                      itemCount: _recs.length,
+                      itemBuilder: (ctx, i) {
+                        debugPrint('🚩 itemBuilder 호출됨: index=$i');
+                        final rec = _recs[i];
+                        return RecordingListItem(
+                          rec: rec,
+                          onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => ResultScreen(recording: rec),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
     );
   }
 }

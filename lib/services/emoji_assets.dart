@@ -38,6 +38,11 @@ class EmojiAssetManager {
       '$_pathPrefix$fileName',
       width: width,
       height: height,
+      placeholderBuilder: (BuildContext context) => SizedBox(
+        width: width,
+        height: height,
+        child: const Icon(Icons.error_outline, color: Colors.red),
+      ),
     );
   }
 }

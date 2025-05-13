@@ -22,10 +22,10 @@ class PermissionGate extends StatefulWidget {
   }) : super(key: key);
 
   @override
-  _PermissionGateState createState() => _PermissionGateState();
+  PermissionGateState createState() => PermissionGateState();
 }
 
-class _PermissionGateState extends State<PermissionGate> {
+class PermissionGateState extends State<PermissionGate> {
   bool _allGranted = false;
   bool _denied = false;
 
@@ -86,7 +86,7 @@ class _PermissionGateState extends State<PermissionGate> {
   Future<bool> _requestStoragePermission() async {
     if (!Platform.isAndroid) return true;
     final androidInfo = await DeviceInfoPlugin().androidInfo;
-    final sdk = androidInfo.version.sdkInt ?? 0;
+    final sdk = androidInfo.version.sdkInt;
 
     if (sdk >= 33) {
       // Android 13 이상: 모든 파일 접근 요청
@@ -108,7 +108,7 @@ class _PermissionGateState extends State<PermissionGate> {
       return status.isGranted;
     }
   }
-
+/*
   Future<bool> _showSettingsDialog({
     required String title,
     required String message,
@@ -131,7 +131,7 @@ class _PermissionGateState extends State<PermissionGate> {
           ),
         )) ??
         false;
-  }
+  }*/
 
   @override
   Widget build(BuildContext context) {
