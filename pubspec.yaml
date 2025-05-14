@@ -33,7 +33,14 @@ dependencies:
   intl: ^0.17.0
   device_info_plus: ^11.4.0
   flutter_svg: ^2.1.0
-  
+  flutter_native_splash: ^2.3.5
+
+flutter_native_splash:
+  color: "#ffffff"
+  image: assets/splash/ai_sleep_logo.png
+  android: true
+  ios: true
+
 dependency_overrides:
   # Android 플랫폼용 permission_handler 패키지를 최신으로 강제 지정
   permission_handler_android: ^13.0.1
@@ -49,3 +56,4 @@ flutter:
     - .env
     - assets/fonts/
     - assets/emojis/
+    - assets/splash/ai_sleep_logo.png

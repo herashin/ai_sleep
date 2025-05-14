@@ -3,15 +3,14 @@
 import 'dart:io';
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 import '../widgets/recording_list_item.dart';
 import '../models/recording.dart';
 import 'result_screen.dart';
-import 'package:flutter/foundation.dart';
-import 'package:permission_handler/permission_handler.dart';
 
 Future<bool> ensureManageStoragePermission() async {
-  // 먼저 권한 상태를 정확히 확인
   final status = await Permission.manageExternalStorage.status;
   if (status.isGranted) {
     debugPrint('✅ 모든 파일 접근 권한이 이미 허용되어 있습니다.');
@@ -24,7 +23,6 @@ Future<bool> ensureManageStoragePermission() async {
   }
 }
 
-// 이 함수는 꼭 클래스 외부에 최상위로 선언해야 합니다.
 Future<List<Recording>> fetchRecordingsFromDir(String dirPath) async {
   final dir = Directory(dirPath);
   if (!await dir.exists()) return [];
@@ -36,9 +34,7 @@ Future<List<Recording>> fetchRecordingsFromDir(String dirPath) async {
         final jsonString = await entity.readAsString(encoding: utf8);
         final map = jsonDecode(jsonString) as Map<String, dynamic>;
         recs.add(Recording.fromJson(map));
-      } catch (_) {
-        // 오류난 파일은 무시하고 계속 진행
-      }
+      } catch (_) {}
     }
   }
 
@@ -62,29 +58,23 @@ class RecordingListScreenState extends State<RecordingListScreen> {
   void initState() {
     super.initState();
     ensureManageStoragePermission();
-    debugPrint('▶▶▶ RecordingListScreen.initState()');
     _fetchRecordings();
   }
 
   Future<void> _fetchRecordings() async {
-    debugPrint('🚩 _fetchRecordings() 호출됨');
+    setState(() => _loading = true);
     try {
-      final recs =
-          await compute(fetchRecordingsFromDir, '/storage/emulated/0/AI_Sleep');
-      debugPrint('✅ compute 완료, recordings 개수: ${recs.length}');
-
+      final recs = await compute(
+        fetchRecordingsFromDir,
+        '/storage/emulated/0/AI_Sleep',
+      );
       if (!mounted) return;
       setState(() {
         _recs = recs;
         _loading = false;
       });
-
-      for (final r in recs) {
-        debugPrint(
-            '📌 로드된 recording: ${r.patientName}, ${r.audioPath}, ${r.createdAt}, summaryItems 개수: ${r.summaryItems.length}');
-      }
     } catch (e, stack) {
-      debugPrint('🚨 fetchRecordings 예외 발생: $e, stack: $stack');
+      debugPrint('에러 발생: \$e\n$stack');
       if (!mounted) return;
       setState(() {
         _error = e.toString();
@@ -95,8 +85,6 @@ class RecordingListScreenState extends State<RecordingListScreen> {
 
   @override
   Widget build(BuildContext context) {
-    debugPrint(
-        '▶▶▶ RecordingListScreen.build() [loading=$_loading, error=$_error, count=${_recs.length}]');
     return Scaffold(
       appBar: AppBar(title: const Text('녹음 기록 목록')),
       body: _loading
@@ -108,16 +96,21 @@ class RecordingListScreenState extends State<RecordingListScreen> {
                   : ListView.builder(
                       itemCount: _recs.length,
                       itemBuilder: (ctx, i) {
-                        debugPrint('🚩 itemBuilder 호출됨: index=$i');
                         final rec = _recs[i];
                         return RecordingListItem(
                           rec: rec,
-                          onTap: () => Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => ResultScreen(recording: rec),
-                            ),
-                          ),
+                          onTap: () async {
+                            // ResultScreen 진입 후 돌아오면 항상 목록 리로드
+                            await Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => ResultScreen(
+                                  initialRecording: rec,
+                                ),
+                              ),
+                            );
+                            _fetchRecordings();
+                          },
                         );
                       },
                     ),
