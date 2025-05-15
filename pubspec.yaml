@@ -37,9 +37,12 @@ dependencies:
 
 flutter_native_splash:
   color: "#ffffff"
-  image: assets/splash/ai_sleep_logo.png
+  image: assets/splash/splash.png
   android: true
   ios: true
+  android_gravity: center
+  fullscreen: true
+
 
 dependency_overrides:
   # Android 플랫폼용 permission_handler 패키지를 최신으로 강제 지정
@@ -56,4 +59,4 @@ flutter:
     - .env
     - assets/fonts/
     - assets/emojis/
-    - assets/splash/ai_sleep_logo.png
+    - assets/splash/splash.png
