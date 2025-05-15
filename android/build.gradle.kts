@@ -2,6 +2,8 @@ allprojects {
     repositories {
         google()
         mavenCentral()
+        maven("https://www.jitpack.io")
+        maven("https://raw.githubusercontent.com/tanersener/ffmpeg-kit/main")
     }
 }
 

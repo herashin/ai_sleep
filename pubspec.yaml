@@ -34,6 +34,10 @@ dependencies:
   device_info_plus: ^11.4.0
   flutter_svg: ^2.1.0
   flutter_native_splash: ^2.3.5
+  googleapis: ^11.2.0
+  googleapis_auth: ^1.4.0
+  ffmpeg_kit_flutter_new: ^1.4.1
+  
 
 flutter_native_splash:
   color: "#ffffff"
@@ -60,3 +64,4 @@ flutter:
     - assets/fonts/
     - assets/emojis/
     - assets/splash/splash.png
+    - assets/mineral-battery-459905-i3-27ecd47986ab.json
