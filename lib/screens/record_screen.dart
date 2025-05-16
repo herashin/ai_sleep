@@ -35,10 +35,13 @@ String getSttEncoding() {
 
 // 🎛️ FFmpeg 변환 함수 추가
 Future<File> convertToWav(File inputFile) async {
-  final wavPath =
-      inputFile.path.replaceAll(RegExp(r'\.[a-zA-Z0-9]+\$'), '.wav');
+  final dir = inputFile.parent.path;
+  final fileNameWithoutExt = inputFile.uri.pathSegments.last.split('.').first;
+  final wavPath = '$dir/${fileNameWithoutExt}_converted.wav';
+
   final command =
-      '-i "${inputFile.path}" -ar 16000 -ac 1 -c:a pcm_s16le "$wavPath"';
+      '-y -i "${inputFile.path}" -ar 16000 -ac 1 -c:a pcm_s16le "$wavPath"';
+
   final session = await FFmpegKit.execute(command);
   final returnCode = await session.getReturnCode();
 
@@ -57,11 +60,19 @@ Future<File> convertToWav(File inputFile) async {
 
 Future<bool> ensureManageStoragePermission() async {
   final status = await Permission.manageExternalStorage.status;
+
   if (status.isGranted) {
     debugPrint('✅ 모든 파일 접근 권한이 이미 허용되어 있습니다.');
     return true;
   } else {
     debugPrint('🚩 모든 파일 접근 권한을 요청합니다.');
+
+    // 이미 요청 중이면 오류가 발생하므로 status 확인만 하고, request는 하지 않음
+    if (await Permission.manageExternalStorage.isPermanentlyDenied ||
+        await Permission.manageExternalStorage.isDenied) {
+      return false; // 거부 상태면 false만 반환하고 요청은 하지 않음
+    }
+
     final result = await Permission.manageExternalStorage.request();
     debugPrint('✅ 권한 요청 결과: $result');
     return result.isGranted;
@@ -110,23 +121,21 @@ class RecordScreenState extends State<RecordScreen> {
   }
 
   Future<void> _toggleRecording() async {
-    final hasStorage = await ensureManageStoragePermission();
-    final hasMic = await Permission.microphone.isGranted;
-
-    if (!hasStorage) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('파일 접근 권한이 필요합니다.')),
-      );
-      return;
-    }
-    if (!hasMic) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('마이크 권한이 필요합니다.')),
-      );
-      return;
-    }
+    /*
     if (_isLoading || !_recorderReady) return;
 
+    final micGranted = await Permission.microphone.isGranted;
+    final storageGranted = await Permission.manageExternalStorage.isGranted;
+
+    if (!micGranted || !storageGranted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('권한 허용 후 다시 시도해주세요')),
+      );
+      return;
+    }
+    */
+
+    // ⬇ 이하 기존 로직 유지
     if (_isRecording) {
       _timer?.cancel();
       final tempPath = await _recorder.stopRecorder();
@@ -158,7 +167,7 @@ class RecordScreenState extends State<RecordScreen> {
         debugPrint('🎙️ 녹음 시작: $outPath');
         await _recorder.startRecorder(
           toFile: outPath,
-          codec: audioCodec, // 안정적인 코덱으로 임시 사용
+          codec: audioCodec,
           sampleRate: 16000,
           numChannels: 1,
         );
@@ -187,8 +196,8 @@ class RecordScreenState extends State<RecordScreen> {
     final raw = await _sttService.transcribe(wavFile, getSttEncoding());
     setState(() => _isLoading = true);
     try {
-      debugPrint('📤 STT 전송 파일: ${file.path}');
-      debugPrint('📦 파일 크기: ${file.lengthSync()} bytes');
+      debugPrint('📤 STT 전송 파일: ${wavFile.path}');
+      debugPrint('📦 파일 크기: ${wavFile.lengthSync()} bytes');
 
       // 1) STT
       //    final raw = await _sttService.transcribe(file, getSttEncoding());
