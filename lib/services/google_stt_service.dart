@@ -4,6 +4,7 @@ import 'package:flutter/services.dart' show rootBundle;
 import 'package:googleapis/speech/v1.dart';
 import 'package:googleapis/storage/v1.dart' as gcs;
 import 'package:googleapis_auth/auth_io.dart';
+import 'package:flutter/foundation.dart';
 
 class GoogleSTTService {
   final _scopes = [
@@ -59,59 +60,77 @@ class GoogleSTTService {
         'encoding': 'FLAC',
         'sampleRateHertz': 16000,
         'languageCode': 'ko-KR',
+        'enableAutomaticPunctuation': true,
+        'useEnhanced': true,
+        'model': 'latest_long',
         'enableSpeakerDiarization': true,
-        'minSpeakerCount': 2,
-        'maxSpeakerCount': 3,
-        'model': 'latest_long ',
+        'diarizationSpeakerCount': 2,
       },
-      'audio': {
-        'uri': gcsUri,
-      },
+      'audio': {'uri': gcsUri},
     });
 
     final operation = await speechApi.speech.longrunningrecognize(request);
     final opName = operation.name!;
+    const maxAttempts = 30;
+    int attempts = 0;
 
-    // 🔁 대기 루프 (폴링)
-    while (true) {
+    while (attempts < maxAttempts) {
       final result = await speechApi.operations.get(opName);
       if (result.done == true) {
-        final json = result.toJson();
+        if (result.error != null) {
+          debugPrint(
+              '❌ STT API 에러 발생: ${result.error!.code}, ${result.error!.message}');
+          return null;
+        }
 
-        // response → results → alternatives → transcript
-        final responseData = json['response'];
+        final json = result.toJson();
+        final responseData = json['response'] as Map<String, dynamic>?;
+
+        if (responseData == null) {
+          debugPrint('⚠️ STT 응답이 비어있습니다.');
+          return null;
+        }
+
         final results = responseData['results'] as List<dynamic>?;
 
         if (results != null && results.isNotEmpty) {
-          final firstAlternative = results.first['alternatives'][0];
+          final buffer = StringBuffer();
 
-          // 🗣️ 화자 분석된 단어 목록이 있을 경우
-          final words = firstAlternative['words'] as List<dynamic>?;
+          for (var result in results) {
+            final alternative = result['alternatives'][0];
+            final words = alternative['words'] as List<dynamic>?;
 
-          if (words != null && words.isNotEmpty) {
-            final buffer = StringBuffer();
-            int currentSpeaker = words.first['speakerTag'];
-            buffer.write('화자$currentSpeaker: ');
+            if (words != null && words.isNotEmpty) {
+              int currentSpeaker = words.first['speakerTag'];
+              buffer.write('화자$currentSpeaker: ');
 
-            for (var word in words) {
-              final speaker = word['speakerTag'];
-              final w = word['word'];
-              if (speaker != currentSpeaker) {
-                currentSpeaker = speaker;
-                buffer.write('\n화자$currentSpeaker: ');
+              for (var word in words) {
+                final speaker = word['speakerTag'];
+                final w = word['word'];
+                if (speaker != currentSpeaker) {
+                  currentSpeaker = speaker;
+                  buffer.write('\n화자$currentSpeaker: ');
+                }
+                buffer.write('$w ');
               }
-              buffer.write('$w ');
+              buffer.write('\n');
+            } else {
+              buffer.writeln(alternative['transcript']);
             }
-
-            return buffer.toString().trim();
-          } else {
-            // 화자 정보 없으면 기본 텍스트 추출
-            return firstAlternative['transcript'];
           }
+
+          return buffer.toString().trim();
+        } else {
+          debugPrint('⚠️ STT 결과가 없습니다.');
+          return null;
         }
       }
 
       await Future.delayed(const Duration(seconds: 2));
+      attempts++;
     }
+
+    debugPrint('⚠️ STT 처리 시간이 초과되었습니다.');
+    return null;
   }
 }

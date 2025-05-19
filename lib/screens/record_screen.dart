@@ -25,7 +25,7 @@ Future<File> convertToWav(File inputFile) async {
   // final command =
   //   '-y -i "${inputFile.path}" -ar 16000 -ac 1 -sample_fmt s16 "$wavPath"';
   final command =
-      '-y -i "${inputFile.path}" -af "volume=3.0" -ar 16000 -ac 1 -sample_fmt s16 -c:a flac "$wavPath"';
+      '-y -i "${inputFile.path}" -af "afftdn=nf=-25" -ar 16000 -ac 1 -sample_fmt s16 -c:a flac "$wavPath"';
 
   final session = await FFmpegKit.execute(command);
   final returnCode = await session.getReturnCode();
