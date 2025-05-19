@@ -12,7 +12,6 @@ class GoogleSTTService {
     gcs.StorageApi.devstorageFullControlScope,
   ];
 
-  // 🔄 전체 흐름을 처리하는 통합 함수
   Future<String?> transcribeViaGCS(File audioFile, String bucketName) async {
     try {
       final jsonStr = await rootBundle
@@ -22,12 +21,11 @@ class GoogleSTTService {
       final gcsUri = await _uploadToGCS(audioFile, creds, bucketName);
       return await _transcribeFromGCS(gcsUri, creds);
     } catch (e) {
-      print('❌ 전체 STT 처리 중 오류: $e');
+      debugPrint('❌ 전체 STT 처리 중 오류: $e');
       return null;
     }
   }
 
-  // 📤 GCS 업로드
   Future<String> _uploadToGCS(
       File file, ServiceAccountCredentials creds, String bucketName) async {
     final client = await clientViaServiceAccount(
@@ -44,11 +42,10 @@ class GoogleSTTService {
     );
 
     client.close();
-    print('✅ GCS 업로드 완료: gs://$bucketName/$objectName');
+    debugPrint('✅ GCS 업로드 완료: gs://$bucketName/$objectName');
     return 'gs://$bucketName/$objectName';
   }
 
-  // 🧠 GCS 기반 STT 요청 (LongRunningRecognize)
   Future<String?> _transcribeFromGCS(
       String gcsUri, ServiceAccountCredentials creds) async {
     final client =
@@ -61,10 +58,15 @@ class GoogleSTTService {
         'sampleRateHertz': 16000,
         'languageCode': 'ko-KR',
         'enableAutomaticPunctuation': true,
-        'useEnhanced': true,
+        'useEnhanced': false,
         'model': 'latest_long',
         'enableSpeakerDiarization': true,
-        'diarizationSpeakerCount': 2,
+        'diarizationConfig': {
+          'enableSpeakerDiarization': true,
+          'minSpeakerCount': 2,
+          'maxSpeakerCount': 3,
+        },
+        'enableWordTimeOffsets': true,
       },
       'audio': {'uri': gcsUri},
     });
@@ -95,41 +97,63 @@ class GoogleSTTService {
 
         if (results != null && results.isNotEmpty) {
           final buffer = StringBuffer();
+          final Set<String> seenSentences = {};
 
           for (var result in results) {
             final alternative = result['alternatives'][0];
             final words = alternative['words'] as List<dynamic>?;
 
+            String text;
+
             if (words != null && words.isNotEmpty) {
-              int currentSpeaker = words.first['speakerTag'];
-              buffer.write('화자$currentSpeaker: ');
+              // words로 화자별 문장 조립
+              final sentenceBuffer = StringBuffer();
+              int lastSpeakerTag = words.first['speakerTag'] ?? 1;
+              sentenceBuffer.write('(화자$lastSpeakerTag) ');
 
               for (var word in words) {
-                final speaker = word['speakerTag'];
+                final speaker = word['speakerTag'] ?? lastSpeakerTag;
                 final w = word['word'];
-                if (speaker != currentSpeaker) {
-                  currentSpeaker = speaker;
-                  buffer.write('\n화자$currentSpeaker: ');
+
+                if (speaker != lastSpeakerTag) {
+                  sentenceBuffer.write('\n(화자$speaker) ');
+                  lastSpeakerTag = speaker;
                 }
-                buffer.write('$w ');
+                sentenceBuffer.write('$w ');
               }
-              buffer.write('\n');
+              text = sentenceBuffer.toString().trim();
             } else {
-              buffer.writeln(alternative['transcript']);
+              // words가 없을 때만 transcript 사용
+              text = alternative['transcript'].toString().trim();
+            }
+
+            // 문장 전체 단위로만 중복 제거
+            if (text.isNotEmpty && !seenSentences.contains(text)) {
+              seenSentences.add(text);
+              buffer.writeln(text);
             }
           }
 
-          return buffer.toString().trim();
+          // 최종 결과 정리 (불필요한 특수문자/공백/숫자-문자 분리 등 후처리)
+          String cleanResult = buffer
+              .toString()
+              .replaceAll(RegExp(r'▁'), '')
+              .replaceAll(RegExp(r'\s+'), ' ')
+              .replaceAllMapped(
+                  RegExp(r'(\d+)([가-힣a-zA-Z])'), (m) => '${m[1]} ${m[2]}')
+              .replaceAllMapped(
+                  RegExp(r'([가-힣a-zA-Z])(\d+)'), (m) => '${m[1]} ${m[2]}')
+              .trim();
+
+          return cleanResult;
         } else {
           debugPrint('⚠️ STT 결과가 없습니다.');
           return null;
         }
       }
-
       await Future.delayed(const Duration(seconds: 2));
       attempts++;
     }
-
     debugPrint('⚠️ STT 처리 시간이 초과되었습니다.');
     return null;
   }
