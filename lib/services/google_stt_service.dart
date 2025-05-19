@@ -103,12 +103,9 @@ class GoogleSTTService {
             final alternative = result['alternatives'][0];
             final words = alternative['words'] as List<dynamic>?;
 
-            String text;
-
             if (words != null && words.isNotEmpty) {
-              // words로 화자별 문장 조립
-              final sentenceBuffer = StringBuffer();
               int lastSpeakerTag = words.first['speakerTag'] ?? 1;
+              StringBuffer sentenceBuffer = StringBuffer();
               sentenceBuffer.write('(화자$lastSpeakerTag) ');
 
               for (var word in words) {
@@ -116,29 +113,42 @@ class GoogleSTTService {
                 final w = word['word'];
 
                 if (speaker != lastSpeakerTag) {
-                  sentenceBuffer.write('\n(화자$speaker) ');
+                  // 현재까지 누적된 화자 문장을 한 줄로 기록
+                  String sentence = sentenceBuffer.toString().trim();
+                  if (sentence.isNotEmpty &&
+                      !seenSentences.contains(sentence)) {
+                    seenSentences.add(sentence);
+                    buffer.writeln(sentence); // ★줄바꿈은 buffer.writeln()이 책임★
+                  }
+                  // 새 화자로 초기화
+                  sentenceBuffer = StringBuffer();
+                  sentenceBuffer.write('(화자$speaker) ');
                   lastSpeakerTag = speaker;
                 }
                 sentenceBuffer.write('$w ');
               }
-              text = sentenceBuffer.toString().trim();
+              // 마지막 화자 문장도 반드시 기록
+              String sentence = sentenceBuffer.toString().trim();
+              if (sentence.isNotEmpty && !seenSentences.contains(sentence)) {
+                seenSentences.add(sentence);
+                buffer.writeln(sentence); // ★여기도 buffer.writeln★
+              }
             } else {
               // words가 없을 때만 transcript 사용
-              text = alternative['transcript'].toString().trim();
-            }
-
-            // 문장 전체 단위로만 중복 제거
-            if (text.isNotEmpty && !seenSentences.contains(text)) {
-              seenSentences.add(text);
-              buffer.writeln(text);
+              String transcript = alternative['transcript'].toString().trim();
+              if (transcript.isNotEmpty &&
+                  !seenSentences.contains(transcript)) {
+                seenSentences.add(transcript);
+                buffer.writeln(transcript);
+              }
             }
           }
 
-          // 최종 결과 정리 (불필요한 특수문자/공백/숫자-문자 분리 등 후처리)
+          // 최종 결과 정리
           String cleanResult = buffer
               .toString()
               .replaceAll(RegExp(r'▁'), '')
-              .replaceAll(RegExp(r'\s+'), ' ')
+              //  .replaceAll(RegExp(r'\s+'), ' ')
               .replaceAllMapped(
                   RegExp(r'(\d+)([가-힣a-zA-Z])'), (m) => '${m[1]} ${m[2]}')
               .replaceAllMapped(
