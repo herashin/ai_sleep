@@ -63,8 +63,9 @@ class GoogleSTTService {
         'enableSpeakerDiarization': true,
         'diarizationConfig': {
           'enableSpeakerDiarization': true,
-          'minSpeakerCount': 2,
-          'maxSpeakerCount': 3,
+          //  'minSpeakerCount': 2,
+          //  'maxSpeakerCount': 3,
+          'diarizationSpeakerCount': 2,
         },
         'enableWordTimeOffsets': true,
       },

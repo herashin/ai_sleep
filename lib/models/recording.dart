@@ -1,5 +1,3 @@
-// lib/models/recording.dart
-
 import 'package:flutter/foundation.dart';
 import 'summary_item.dart';
 
@@ -9,6 +7,7 @@ class Recording {
   final String audioPath;
   final String patientName;
   final String originalText;
+  final List<Map<String, dynamic>>? speakers;
   final List<SummaryItem> summaryItems;
   final DateTime createdAt;
 
@@ -16,15 +15,16 @@ class Recording {
     required this.audioPath,
     required this.patientName,
     required this.originalText,
+    this.speakers,
     required this.summaryItems,
     required this.createdAt,
   });
 
-  /// 객체 복사본을 일부 필드만 변경해 생성
   Recording copyWith({
     String? audioPath,
     String? patientName,
     String? originalText,
+    List<Map<String, dynamic>>? speakers,
     List<SummaryItem>? summaryItems,
     DateTime? createdAt,
   }) {
@@ -32,12 +32,12 @@ class Recording {
       audioPath: audioPath ?? this.audioPath,
       patientName: patientName ?? this.patientName,
       originalText: originalText ?? this.originalText,
+      speakers: speakers ?? this.speakers,
       summaryItems: summaryItems ?? this.summaryItems,
       createdAt: createdAt ?? this.createdAt,
     );
   }
 
-  /// JSON → Recording 객체
   factory Recording.fromJson(Map<String, dynamic> map) {
     final createdAtStr = map['createdAt'] as String? ?? '';
     final parsedDate = DateTime.tryParse(createdAtStr) ?? DateTime.now();
@@ -51,21 +51,27 @@ class Recording {
           .toList();
     }
 
+    final rawSpeakers = map['speakers'];
+    final parsedSpeakers = (rawSpeakers is List)
+        ? rawSpeakers.whereType<Map<String, dynamic>>().toList()
+        : null;
+
     return Recording(
       audioPath: map['audioPath'] as String? ?? '',
       patientName: map['patientName'] as String? ?? 'unknown',
       originalText: map['originalText'] as String? ?? '',
+      speakers: parsedSpeakers,
       summaryItems: items,
       createdAt: parsedDate,
     );
   }
 
-  /// Recording 객체 → JSON
   Map<String, dynamic> toJson() => {
         'audioPath': audioPath,
         'patientName': patientName,
         'originalText': originalText,
         'createdAt': createdAt.toIso8601String(),
         'summaryItems': summaryItems.map((e) => e.toJson()).toList(),
+        'speakers': speakers,
       };
 }
