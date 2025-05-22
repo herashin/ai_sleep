@@ -71,9 +71,14 @@ class Recording {
 
     // ★ dialogues 파싱
     final rawDialogues = map['dialogues'];
-    final parsedDialogues = (rawDialogues is List)
-        ? rawDialogues.whereType<Map<String, dynamic>>().toList()
-        : <Map<String, dynamic>>[];
+    final parsedDialogues = <Map<String, dynamic>>[];
+    if (rawDialogues is List) {
+      for (var item in rawDialogues) {
+        if (item is Map) {
+          parsedDialogues.add(Map<String, dynamic>.from(item));
+        }
+      }
+    }
 
     return Recording(
       audioPath: map['audioPath'] as String? ?? '',
@@ -83,10 +88,9 @@ class Recording {
       summaryItems: items,
       createdAt: parsedDate,
       labeledTexts: parsedLabeledTexts,
-      dialogues: parsedDialogues, // ★ 추가
+      dialogues: parsedDialogues, // 여기로 넘겨줍니다
     );
   }
-
   Map<String, dynamic> toJson() => {
         'audioPath': audioPath,
         'patientName': patientName,

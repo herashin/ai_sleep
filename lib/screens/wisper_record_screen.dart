@@ -68,66 +68,6 @@ class PermissionHelper {
   }
 }
 
-class PyannoteService {
-  final String _baseUrl;
-
-  PyannoteService({String baseUrl = 'http://192.168.0.91:5000'})
-      : _baseUrl = baseUrl;
-
-  Future<List<SpeakerSegment>?> diarizeAudio(String filePath) async {
-    final url = Uri.parse('$_baseUrl/diarize');
-    try {
-      final request = http.MultipartRequest('POST', url);
-      request.files.add(await http.MultipartFile.fromPath('file', filePath));
-      final streamedResponse = await request.send();
-      final response = await http.Response.fromStream(streamedResponse);
-
-      if (response.statusCode == 200) {
-        final List<dynamic> jsonList = json.decode(response.body);
-        return jsonList.map((json) => SpeakerSegment.fromJson(json)).toList();
-      } else {
-        print('Pyannote API 오류: ${response.statusCode}, ${response.body}');
-      }
-    } catch (e) {
-      print('Pyannote 요청 중 오류: $e');
-    }
-    return null;
-  }
-}
-
-class SpeakerSegment {
-  final String speaker;
-  final double start;
-  final double end;
-
-  SpeakerSegment(
-      {required this.speaker, required this.start, required this.end});
-
-  factory SpeakerSegment.fromJson(Map<String, dynamic> json) {
-    return SpeakerSegment(
-      speaker: json['speaker'] as String,
-      start: (json['start'] as num).toDouble(),
-      end: (json['end'] as num).toDouble(),
-    );
-  }
-}
-
-class WhisperSegment {
-  final double start;
-  final double end;
-  final String text;
-
-  WhisperSegment({required this.start, required this.end, required this.text});
-
-  factory WhisperSegment.fromJson(Map<String, dynamic> json) {
-    return WhisperSegment(
-      start: (json['start'] as num).toDouble(),
-      end: (json['end'] as num).toDouble(),
-      text: json['text'] as String,
-    );
-  }
-}
-
 class RecordScreen extends StatefulWidget {
   const RecordScreen({Key? key}) : super(key: key);
 
@@ -139,9 +79,6 @@ class RecordScreenState extends State<RecordScreen> {
   final FlutterSoundRecorder _recorder = FlutterSoundRecorder();
   final STTService _sttService = STTService();
   final GPTService _gptService = GPTService();
-  final PyannoteService _pyannoteService =
-      PyannoteService(baseUrl: 'http://192.168.0.91:5000');
-
   final PermissionHelper _permissionHelper = PermissionHelper();
 
   StreamSubscription? _recorderSub;
@@ -152,11 +89,7 @@ class RecordScreenState extends State<RecordScreen> {
   bool _recorderReady = false;
   String? _filePath;
 
-  List<SpeakerSegment> _speakerSegments = [];
-  List<WhisperSegment> _whisperSegments = [];
-  List<Map<String, dynamic>> _dialogues = []; // ★ dialog 구조
-
-  bool _isCheckingPermissions = false;
+  List<Map<String, dynamic>> _dialogues = [];
 
   @override
   void initState() {
@@ -193,13 +126,6 @@ class RecordScreenState extends State<RecordScreen> {
   Future<void> _toggleRecording() async {
     if (_isLoading || !_recorderReady) return;
 
-    if (_isCheckingPermissions) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('권한 요청 처리 중입니다. 잠시만 기다려 주세요.')),
-      );
-      return;
-    }
-
     bool granted = await _permissionHelper.checkAndRequestPermissions(
       requireMicrophone: true,
       requireStorage: true,
@@ -230,8 +156,6 @@ class RecordScreenState extends State<RecordScreen> {
         _isRecording = true;
         _elapsedMs = 0;
         _filePath = null;
-        _speakerSegments = [];
-        _whisperSegments = [];
         _dialogues = [];
       });
 
@@ -263,115 +187,64 @@ class RecordScreenState extends State<RecordScreen> {
   }
 
   Future<String> _convertAudioFormat(String inputPath) async {
-    final outputPath = inputPath.replaceAll(RegExp(r'\.\w+$'), '.wav');
+    final outputPath = inputPath.replaceAll(RegExp(r'\.\w+\$'), '.wav');
     final command = '-i "$inputPath" -ar 16000 -ac 1 "$outputPath"';
 
     final session = await FFmpegKit.execute(command);
     final returnCode = await session.getReturnCode();
 
     if (ReturnCode.isSuccess(returnCode)) {
-      print('FFmpeg 변환 성공: $outputPath');
       return outputPath;
     } else {
-      print('FFmpeg 변환 실패, 코드: $returnCode');
-      throw Exception('FFmpeg 변환 실패');
+      throw Exception('FFmpeg 변환 실패 코드: $returnCode');
     }
-  }
-
-  void _matchSegmentsAndBuildDialogues() {
-    _dialogues.clear();
-
-    for (final wSeg in _whisperSegments) {
-      final matchingSpeaker = _speakerSegments.firstWhere(
-        (sSeg) => wSeg.start < sSeg.end && wSeg.end > sSeg.start,
-        orElse: () => SpeakerSegment(speaker: 'Unknown', start: 0, end: 0),
-      );
-      _dialogues.add({
-        "speaker": matchingSpeaker.speaker,
-        "start": wSeg.start,
-        "end": wSeg.end,
-        "text": wSeg.text,
-      });
-    }
-    setState(() {}); // UI 필요시 갱신
   }
 
   Future<void> _processRecording(File file) async {
     setState(() => _isLoading = true);
     try {
-      print('▶ FFmpeg 변환 시작: ${file.path}');
+      // 1) FFmpeg 변환
       final convertedPath = await _convertAudioFormat(file.path);
-      print('▶ FFmpeg 변환 완료: $convertedPath');
       final convertedFile = File(convertedPath);
 
-      print('▶ Whisper STT 요청 시작');
+      // 2) STT + Diarize API 호출
       final rawJson =
           await _sttService.transcribeAudioWithSegments(convertedFile);
-      if (rawJson == null) {
-        print('❌ Whisper STT 결과 없음');
-        throw Exception('음성 인식 실패');
-      }
-      print('▶ Whisper STT 결과 수신');
+      if (rawJson == null) throw Exception('음성 인식 실패');
 
-      final segmentsJson = rawJson['segments'] as List<dynamic>? ?? [];
-      print('▶ Whisper 세그먼트 개수: ${segmentsJson.length}');
-      _whisperSegments = segmentsJson
-          .map((e) => WhisperSegment.fromJson(e as Map<String, dynamic>))
-          .toList();
+      // 3) 서버가 돌려준 dialogues 사용
+      final serverDialogues =
+          (rawJson['dialogues'] as List).cast<Map<String, dynamic>>();
+      setState(() {
+        _dialogues = serverDialogues;
+      });
 
-      print('▶ Pyannote 화자분리 요청 시작');
-      final diarizationSegments =
-          await _pyannoteService.diarizeAudio(convertedFile.path);
-      if (diarizationSegments == null) {
-        print('❌ Pyannote 화자분리 실패');
-        _speakerSegments = [];
-      } else {
-        print('▶ Pyannote 화자분리 결과 수신: ${diarizationSegments.length} 세그먼트');
-        _speakerSegments = diarizationSegments;
-        for (var seg in diarizationSegments) {
-          print('  - 화자: ${seg.speaker}, 시작: ${seg.start}, 끝: ${seg.end}');
-        }
-      }
+      // 4) GPT 요약
+      final summary =
+          await _gptService.summarizeText(rawJson['text'] as String);
+      if (summary == null) throw Exception('GPT 요약 실패');
 
-      print('▶ 화자-텍스트 매칭(dialogues) 시작');
-      _matchSegmentsAndBuildDialogues();
-      print('▶ 화자-텍스트(dialogues) 매칭 결과: ${_dialogues.length} 항목');
-      for (var d in _dialogues) {
-        print('  [${d["speaker"]}] ${d["text"]}');
-      }
-
-      print('▶ GPT 요약 시작');
-      var summary = await _gptService.summarizeText(rawJson['text'] as String);
-      if (summary == null || summary.isEmpty) throw Exception('GPT 요약 실패');
-      print('▶ GPT 요약 완료');
-
+      // 5) 환자명 추출, 파일 이동 및 메타 저장
       final nameRaw =
           await _gptService.extractPatientName(rawJson['text'] as String);
       final patientName =
-          (nameRaw?.replaceAll(RegExp(r'[^가-힣a-zA-Z0-9]'), '_').trim()) ??
-              'unknown';
-      print('▶ 환자명 추출: $patientName');
-
+          (nameRaw?.replaceAll(RegExp(r'[^가-힣a-zA-Z0-9]'), '_') ?? 'unknown')
+              .trim();
       final dir = Directory('/storage/emulated/0/AI_Sleep');
       final base =
           'consult_${patientName}_${DateTime.now().millisecondsSinceEpoch}';
       final audioPath = '${dir.path}/$base.m4a';
       final metaPath = '${dir.path}/$base.json';
 
-      print('▶ 파일 이동 시작');
       await file.rename(audioPath);
-      print('▶ 파일 이동 완료: $audioPath');
 
       final lines = summary
           .split('\n')
           .map((l) => l.trim())
           .where((l) => l.isNotEmpty)
           .toList();
-
-      final summaryItems = List<SummaryItem>.generate(
-        lines.length,
-        (i) => SummaryItem(iconCode: '', text: lines[i]),
-      );
+      final summaryItems =
+          lines.map((l) => SummaryItem(iconCode: '', text: l)).toList();
 
       final rec = Recording(
         audioPath: audioPath,
@@ -379,31 +252,29 @@ class RecordScreenState extends State<RecordScreen> {
         summaryItems: summaryItems,
         createdAt: DateTime.now(),
         patientName: patientName,
-        speakers: _speakerSegments
-            .map((seg) => {
-                  'speaker': seg.speaker,
-                  'start': seg.start,
-                  'end': seg.end,
+        speakers: serverDialogues
+            .map((d) => {
+                  'speaker': d['speaker'],
+                  'start': d['start'],
+                  'end': d['end'],
                 })
             .toList(),
-        dialogues: _dialogues, // ★ 추가!
+        dialogues: serverDialogues,
       );
 
-      print('▶ JSON 저장 시작');
       await File(metaPath)
           .writeAsString(jsonEncode(rec.toJson()), encoding: utf8);
-      print('▶ JSON 저장 완료: $metaPath');
 
       if (!mounted) return;
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(builder: (_) => ResultScreen(initialRecording: rec)),
       );
-      print('▶ 결과 화면 이동 완료');
     } catch (e) {
-      print('❗ 오류 발생: $e');
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('오류: $e')));
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('오류: $e')));
+      }
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -451,10 +322,9 @@ class RecordScreenState extends State<RecordScreen> {
                 Text('파일 저장: $_filePath', textAlign: TextAlign.center),
               ],
               if (_dialogues.isNotEmpty) ...[
-                // ★ 미리보기 (옵션)
                 const SizedBox(height: 20),
                 Text('화자별 대화 내용',
-                    style: const TextStyle(fontWeight: FontWeight.bold)),
+                    style: TextStyle(fontWeight: FontWeight.bold)),
                 SizedBox(
                   height: 200,
                   child: ListView.builder(
