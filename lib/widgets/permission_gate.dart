@@ -28,6 +28,7 @@ class PermissionGate extends StatefulWidget {
 class PermissionGateState extends State<PermissionGate> {
   bool _allGranted = false;
   bool _denied = false;
+  bool _requestInProgress = false; // 중복 요청 방지 플래그
 
   @override
   void initState() {
@@ -36,6 +37,9 @@ class PermissionGateState extends State<PermissionGate> {
   }
 
   Future<void> _checkAndRequestPermissions() async {
+    if (_requestInProgress) return; // 이미 요청 중이면 리턴
+    _requestInProgress = true;
+
     // 초기 상태 리셋
     if (mounted) {
       setState(() {
@@ -51,6 +55,7 @@ class PermissionGateState extends State<PermissionGate> {
         micStatus = await Permission.microphone.request();
         if (!micStatus.isGranted) {
           _onDenied();
+          _requestInProgress = false;
           return;
         }
       }
@@ -61,6 +66,7 @@ class PermissionGateState extends State<PermissionGate> {
       final granted = await _requestStoragePermission();
       if (!granted) {
         _onDenied();
+        _requestInProgress = false;
         return;
       }
     }
@@ -72,6 +78,8 @@ class PermissionGateState extends State<PermissionGate> {
         _denied = false;
       });
     }
+
+    _requestInProgress = false;
   }
 
   void _onDenied() {
@@ -89,7 +97,7 @@ class PermissionGateState extends State<PermissionGate> {
     final sdk = androidInfo.version.sdkInt;
 
     if (sdk >= 33) {
-      // Android 13 이상: 모든 파일 접근 요청
+      // Android 13 이상
       var status = await Permission.manageExternalStorage.status;
       if (!status.isGranted) {
         status = await Permission.manageExternalStorage.request();
@@ -108,30 +116,6 @@ class PermissionGateState extends State<PermissionGate> {
       return status.isGranted;
     }
   }
-/*
-  Future<bool> _showSettingsDialog({
-    required String title,
-    required String message,
-  }) async {
-    return (await showDialog<bool>(
-          context: context,
-          builder: (_) => AlertDialog(
-            title: Text(title),
-            content: Text(message),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context, false),
-                child: const Text('취소'),
-              ),
-              TextButton(
-                onPressed: () => Navigator.pop(context, true),
-                child: const Text('설정으로'),
-              ),
-            ],
-          ),
-        )) ??
-        false;
-  }*/
 
   @override
   Widget build(BuildContext context) {

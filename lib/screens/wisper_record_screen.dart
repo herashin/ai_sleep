@@ -1,11 +1,10 @@
-// lib/screens/wisper_record_screen.dart
-
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_sound/flutter_sound.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:device_info_plus/device_info_plus.dart';
 
 import '../models/recording.dart';
 import '../models/summary_item.dart';
@@ -15,6 +14,59 @@ import '../widgets/permission_gate.dart';
 import 'result_screen.dart';
 
 import 'package:http/http.dart' as http;
+import 'package:ffmpeg_kit_flutter_new/ffmpeg_kit.dart';
+import 'package:ffmpeg_kit_flutter_new/return_code.dart';
+
+class PermissionHelper {
+  bool _requestInProgress = false;
+
+  Future<bool> checkAndRequestPermissions({
+    bool requireMicrophone = false,
+    bool requireStorage = false,
+  }) async {
+    if (_requestInProgress) return false;
+    _requestInProgress = true;
+
+    if (requireMicrophone) {
+      var micStatus = await Permission.microphone.status;
+      if (!micStatus.isGranted) {
+        micStatus = await Permission.microphone.request();
+        if (!micStatus.isGranted) {
+          _requestInProgress = false;
+          return false;
+        }
+      }
+    }
+
+    if (requireStorage) {
+      final granted = await _requestStoragePermission();
+      if (!granted) {
+        _requestInProgress = false;
+        return false;
+      }
+    }
+
+    _requestInProgress = false;
+    return true;
+  }
+
+  Future<bool> _requestStoragePermission() async {
+    if (!Platform.isAndroid) return true;
+    final androidInfo = await DeviceInfoPlugin().androidInfo;
+    final sdk = androidInfo.version.sdkInt;
+
+    if (sdk >= 30) {
+      var status = await Permission.manageExternalStorage.status;
+      if (!status.isGranted) {
+        status = await Permission.manageExternalStorage.request();
+      }
+      return status.isGranted;
+    } else {
+      final status = await Permission.storage.request();
+      return status.isGranted;
+    }
+  }
+}
 
 class PyannoteService {
   final String _baseUrl;
@@ -60,16 +112,19 @@ class SpeakerSegment {
   }
 }
 
-Future<bool> ensureManageStoragePermission() async {
-  final status = await Permission.manageExternalStorage.status;
-  if (status.isGranted) {
-    debugPrint('✅ 모든 파일 접근 권한이 이미 허용되어 있습니다.');
-    return true;
-  } else {
-    debugPrint('🚩 모든 파일 접근 권한을 요청합니다.');
-    final result = await Permission.manageExternalStorage.request();
-    debugPrint('✅ 권한 요청 결과: $result');
-    return result.isGranted;
+class WhisperSegment {
+  final double start;
+  final double end;
+  final String text;
+
+  WhisperSegment({required this.start, required this.end, required this.text});
+
+  factory WhisperSegment.fromJson(Map<String, dynamic> json) {
+    return WhisperSegment(
+      start: (json['start'] as num).toDouble(),
+      end: (json['end'] as num).toDouble(),
+      text: json['text'] as String,
+    );
   }
 }
 
@@ -84,9 +139,10 @@ class RecordScreenState extends State<RecordScreen> {
   final FlutterSoundRecorder _recorder = FlutterSoundRecorder();
   final STTService _sttService = STTService();
   final GPTService _gptService = GPTService();
-
   final PyannoteService _pyannoteService =
       PyannoteService(baseUrl: 'http://192.168.0.91:5000');
+
+  final PermissionHelper _permissionHelper = PermissionHelper();
 
   StreamSubscription? _recorderSub;
   Timer? _timer;
@@ -96,47 +152,65 @@ class RecordScreenState extends State<RecordScreen> {
   bool _recorderReady = false;
   String? _filePath;
 
-  // ★ 화자 분석 결과 상태 저장용 변수 추가
   List<SpeakerSegment> _speakerSegments = [];
+  List<WhisperSegment> _whisperSegments = [];
+  List<Map<String, dynamic>> _dialogues = []; // ★ dialog 구조
+
+  bool _isCheckingPermissions = false;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      await ensureManageStoragePermission();
+      await _checkPermissionsAndRedirect();
       await _initRecorder();
     });
+  }
+
+  Future<void> _checkPermissionsAndRedirect() async {
+    final microphoneStatus = await Permission.microphone.status;
+    final storageStatus = await Permission.manageExternalStorage.status;
+
+    if (!microphoneStatus.isGranted || !storageStatus.isGranted) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('권한이 없으면 녹음 기능을 사용할 수 없습니다.')),
+      );
+      Navigator.of(context).pop();
+    }
   }
 
   Future<void> _initRecorder() async {
     await _recorder.openRecorder();
     _recorder.setSubscriptionDuration(const Duration(milliseconds: 100));
     _recorderSub = _recorder.onProgress?.listen((event) {
-      if (mounted) {
-        setState(() => _elapsedMs = event.duration.inMilliseconds);
-      }
+      if (mounted) setState(() => _elapsedMs = event.duration.inMilliseconds);
     });
     if (!mounted) return;
     setState(() => _recorderReady = true);
   }
 
   Future<void> _toggleRecording() async {
-    final hasStorage = await ensureManageStoragePermission();
-    final hasMic = await Permission.microphone.isGranted;
-
-    if (!hasStorage) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('파일 접근 권한이 필요합니다.')),
-      );
-      return;
-    }
-    if (!hasMic) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('마이크 권한이 필요합니다.')),
-      );
-      return;
-    }
     if (_isLoading || !_recorderReady) return;
+
+    if (_isCheckingPermissions) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('권한 요청 처리 중입니다. 잠시만 기다려 주세요.')),
+      );
+      return;
+    }
+
+    bool granted = await _permissionHelper.checkAndRequestPermissions(
+      requireMicrophone: true,
+      requireStorage: true,
+    );
+    if (!granted) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('필요한 권한이 허용되어야 합니다.')),
+      );
+      return;
+    }
 
     if (_isRecording) {
       _timer?.cancel();
@@ -156,7 +230,9 @@ class RecordScreenState extends State<RecordScreen> {
         _isRecording = true;
         _elapsedMs = 0;
         _filePath = null;
-        _speakerSegments = []; // 녹음 시작 시 화자 분석 결과 초기화
+        _speakerSegments = [];
+        _whisperSegments = [];
+        _dialogues = [];
       });
 
       final dir = Directory('/storage/emulated/0/AI_Sleep');
@@ -186,78 +262,146 @@ class RecordScreenState extends State<RecordScreen> {
     }
   }
 
+  Future<String> _convertAudioFormat(String inputPath) async {
+    final outputPath = inputPath.replaceAll(RegExp(r'\.\w+$'), '.wav');
+    final command = '-i "$inputPath" -ar 16000 -ac 1 "$outputPath"';
+
+    final session = await FFmpegKit.execute(command);
+    final returnCode = await session.getReturnCode();
+
+    if (ReturnCode.isSuccess(returnCode)) {
+      print('FFmpeg 변환 성공: $outputPath');
+      return outputPath;
+    } else {
+      print('FFmpeg 변환 실패, 코드: $returnCode');
+      throw Exception('FFmpeg 변환 실패');
+    }
+  }
+
+  void _matchSegmentsAndBuildDialogues() {
+    _dialogues.clear();
+
+    for (final wSeg in _whisperSegments) {
+      final matchingSpeaker = _speakerSegments.firstWhere(
+        (sSeg) => wSeg.start < sSeg.end && wSeg.end > sSeg.start,
+        orElse: () => SpeakerSegment(speaker: 'Unknown', start: 0, end: 0),
+      );
+      _dialogues.add({
+        "speaker": matchingSpeaker.speaker,
+        "start": wSeg.start,
+        "end": wSeg.end,
+        "text": wSeg.text,
+      });
+    }
+    setState(() {}); // UI 필요시 갱신
+  }
+
   Future<void> _processRecording(File file) async {
     setState(() => _isLoading = true);
     try {
-      // 1) Whisper STT
-      final raw = await _sttService.transcribeAudio(file);
-      if (raw == null) throw Exception('음성 인식 실패');
+      print('▶ FFmpeg 변환 시작: ${file.path}');
+      final convertedPath = await _convertAudioFormat(file.path);
+      print('▶ FFmpeg 변환 완료: $convertedPath');
+      final convertedFile = File(convertedPath);
 
-      // 1.5) pyannote diarization 호출
+      print('▶ Whisper STT 요청 시작');
+      final rawJson =
+          await _sttService.transcribeAudioWithSegments(convertedFile);
+      if (rawJson == null) {
+        print('❌ Whisper STT 결과 없음');
+        throw Exception('음성 인식 실패');
+      }
+      print('▶ Whisper STT 결과 수신');
+
+      final segmentsJson = rawJson['segments'] as List<dynamic>? ?? [];
+      print('▶ Whisper 세그먼트 개수: ${segmentsJson.length}');
+      _whisperSegments = segmentsJson
+          .map((e) => WhisperSegment.fromJson(e as Map<String, dynamic>))
+          .toList();
+
+      print('▶ Pyannote 화자분리 요청 시작');
       final diarizationSegments =
-          await _pyannoteService.diarizeAudio(file.path);
+          await _pyannoteService.diarizeAudio(convertedFile.path);
       if (diarizationSegments == null) {
-        print('pyannote 분석 실패');
+        print('❌ Pyannote 화자분리 실패');
         _speakerSegments = [];
       } else {
+        print('▶ Pyannote 화자분리 결과 수신: ${diarizationSegments.length} 세그먼트');
         _speakerSegments = diarizationSegments;
-        for (final seg in diarizationSegments) {
-          print('화자: ${seg.speaker}, 시작: ${seg.start}, 끝: ${seg.end}');
+        for (var seg in diarizationSegments) {
+          print('  - 화자: ${seg.speaker}, 시작: ${seg.start}, 끝: ${seg.end}');
         }
       }
-      setState(() {}); // 화자 분석 결과 UI 갱신
 
-      // 2) GPT 간단 요약 (reviseAndSummarize 제거)
-      var summary = await _gptService.summarizeText(raw);
+      print('▶ 화자-텍스트 매칭(dialogues) 시작');
+      _matchSegmentsAndBuildDialogues();
+      print('▶ 화자-텍스트(dialogues) 매칭 결과: ${_dialogues.length} 항목');
+      for (var d in _dialogues) {
+        print('  [${d["speaker"]}] ${d["text"]}');
+      }
+
+      print('▶ GPT 요약 시작');
+      var summary = await _gptService.summarizeText(rawJson['text'] as String);
       if (summary == null || summary.isEmpty) throw Exception('GPT 요약 실패');
+      print('▶ GPT 요약 완료');
 
-      // 3) 환자명 추출
-      final nameRaw = await _gptService.extractPatientName(raw);
+      final nameRaw =
+          await _gptService.extractPatientName(rawJson['text'] as String);
       final patientName =
           (nameRaw?.replaceAll(RegExp(r'[^가-힣a-zA-Z0-9]'), '_').trim()) ??
               'unknown';
+      print('▶ 환자명 추출: $patientName');
 
-      // 4) 파일 이동 및 메타 저장 준비
       final dir = Directory('/storage/emulated/0/AI_Sleep');
       final base =
           'consult_${patientName}_${DateTime.now().millisecondsSinceEpoch}';
       final audioPath = '${dir.path}/$base.m4a';
       final metaPath = '${dir.path}/$base.json';
-      await file.rename(audioPath);
 
-      // 5) SummaryItem 리스트 생성
+      print('▶ 파일 이동 시작');
+      await file.rename(audioPath);
+      print('▶ 파일 이동 완료: $audioPath');
+
       final lines = summary
           .split('\n')
           .map((l) => l.trim())
           .where((l) => l.isNotEmpty)
           .toList();
-      // 기존 summaryIcons가 없으니 빈 리스트로 처리
+
       final summaryItems = List<SummaryItem>.generate(
         lines.length,
-        (i) => SummaryItem(
-          iconCode: '',
-          text: lines[i],
-        ),
+        (i) => SummaryItem(iconCode: '', text: lines[i]),
       );
 
-      // 6) Recording 객체 및 JSON 저장
       final rec = Recording(
         audioPath: audioPath,
-        originalText: raw,
+        originalText: rawJson['text'] as String,
         summaryItems: summaryItems,
         createdAt: DateTime.now(),
         patientName: patientName,
+        speakers: _speakerSegments
+            .map((seg) => {
+                  'speaker': seg.speaker,
+                  'start': seg.start,
+                  'end': seg.end,
+                })
+            .toList(),
+        dialogues: _dialogues, // ★ 추가!
       );
+
+      print('▶ JSON 저장 시작');
       await File(metaPath)
           .writeAsString(jsonEncode(rec.toJson()), encoding: utf8);
+      print('▶ JSON 저장 완료: $metaPath');
 
-      // 7) 결과 화면 이동
       if (!mounted) return;
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(builder: (_) => ResultScreen(initialRecording: rec)),
       );
+      print('▶ 결과 화면 이동 완료');
     } catch (e) {
+      print('❗ 오류 발생: $e');
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text('오류: $e')));
     } finally {
@@ -299,32 +443,29 @@ class RecordScreenState extends State<RecordScreen> {
                     ? const SizedBox(
                         width: 24,
                         height: 24,
-                        child: CircularProgressIndicator(color: Colors.white),
-                      )
+                        child: CircularProgressIndicator(color: Colors.white))
                     : Text(_isRecording ? '녹음 중지' : '녹음 시작'),
               ),
-
               if (_filePath != null) ...[
                 const SizedBox(height: 12),
                 Text('파일 저장: $_filePath', textAlign: TextAlign.center),
               ],
-
-              // ★ 화자 분석 결과 UI 추가
-              if (_speakerSegments.isNotEmpty) ...[
+              if (_dialogues.isNotEmpty) ...[
+                // ★ 미리보기 (옵션)
                 const SizedBox(height: 20),
-                Text('화자 분석 결과',
+                Text('화자별 대화 내용',
                     style: const TextStyle(fontWeight: FontWeight.bold)),
                 SizedBox(
-                  height: 150,
+                  height: 200,
                   child: ListView.builder(
                     shrinkWrap: true,
-                    itemCount: _speakerSegments.length,
+                    itemCount: _dialogues.length,
                     itemBuilder: (context, index) {
-                      final seg = _speakerSegments[index];
+                      final d = _dialogues[index];
                       return ListTile(
-                        leading: CircleAvatar(child: Text(seg.speaker)),
-                        title: Text(
-                            '시작: ${seg.start.toStringAsFixed(2)}초, 끝: ${seg.end.toStringAsFixed(2)}초'),
+                        title: Text('[${d["speaker"]}] ${d["text"]}'),
+                        subtitle: Text(
+                            '(${d["start"].toStringAsFixed(2)}~${d["end"].toStringAsFixed(2)}초)'),
                       );
                     },
                   ),

@@ -1,24 +1,33 @@
-// lib/services/stt_service.dart
-
 import 'dart:convert';
 import 'dart:io';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:http/http.dart' as http;
 
 class STTService {
-  final String _apiKey = dotenv.env['OPENAI_API_KEY']!;
+  final String baseUrl;
 
-  Future<String?> transcribeAudio(File audioFile) async {
-    final uri = Uri.parse('https://api.openai.com/v1/audio/transcriptions');
-    final req = http.MultipartRequest('POST', uri)
-      ..headers['Authorization'] = 'Bearer $_apiKey'
-      ..fields['model'] = 'whisper-1'
-      ..files.add(await http.MultipartFile.fromPath('file', audioFile.path));
-    final resp = await http.Response.fromStream(await req.send());
-    if (resp.statusCode == 200) {
-      return json.decode(resp.body)['text'] as String;
-    } else {
-      print('STT 오류 ${resp.statusCode}: ${resp.body}');
+  STTService({this.baseUrl = 'http://192.168.0.91:5000'});
+
+  /// Flask 서버 /diarize_and_transcribe 호출
+  Future<Map<String, dynamic>?> transcribeAudioWithSegments(
+      File audioFile) async {
+    final uri = Uri.parse('$baseUrl/diarize_and_transcribe');
+
+    try {
+      final request = http.MultipartRequest('POST', uri);
+      request.files
+          .add(await http.MultipartFile.fromPath('file', audioFile.path));
+      final streamedResponse = await request.send();
+      final response = await http.Response.fromStream(streamedResponse);
+
+      if (response.statusCode == 200) {
+        final Map<String, dynamic> jsonResp = json.decode(response.body);
+        return jsonResp;
+      } else {
+        print('STT 서버 오류: ${response.statusCode} ${response.body}');
+        return null;
+      }
+    } catch (e) {
+      print('STT 서버 요청 실패: $e');
       return null;
     }
   }

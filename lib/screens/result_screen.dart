@@ -85,7 +85,8 @@ class _ResultScreenState extends State<ResultScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               // 원본 대화
-              OriginalTextSection(text: rec.originalText),
+              //    OriginalTextSection(text: rec.originalText),
+              OriginalTextSection(dialogues: rec.dialogues),
               const Divider(height: 32),
               // AI 요약
               AISummarySection(

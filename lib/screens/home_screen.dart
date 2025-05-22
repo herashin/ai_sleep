@@ -7,8 +7,39 @@ import 'wisper_record_screen.dart';
 import 'recording_list_screen.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
-class HomeScreen extends StatelessWidget {
+import '../screens/permission_helper.dart'
+    as perm_helper; // PermissionHelper import 추가
+
+class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
+
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  final perm_helper.PermissionHelper _permissionHelper =
+      perm_helper.PermissionHelper();
+
+  Future<void> _handleStartRecording() async {
+    final granted = await _permissionHelper.checkAndRequestPermissions(
+      requireMicrophone: true,
+      requireStorage: true,
+    );
+    if (granted) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const RecordScreen()),
+      );
+    } else {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('권한 허용이 필요합니다. 설정에서 권한을 허용해주세요.'),
+        ),
+      );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -38,14 +69,7 @@ class HomeScreen extends StatelessWidget {
             ElevatedButton.icon(
               icon: const Icon(Icons.play_circle_fill),
               label: const Text('진료 녹음 시작하기'),
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => const RecordScreen(),
-                  ),
-                );
-              },
+              onPressed: _handleStartRecording,
             ).animate().fadeIn(delay: 500.ms),
             const SizedBox(height: 20),
             // 녹음목록 250508

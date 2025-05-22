@@ -10,6 +10,8 @@ class Recording {
   final List<Map<String, dynamic>>? speakers;
   final List<SummaryItem> summaryItems;
   final DateTime createdAt;
+  final List<String> labeledTexts; // (기존 호환)
+  final List<Map<String, dynamic>> dialogues; // ★ 추가!
 
   const Recording({
     required this.audioPath,
@@ -18,6 +20,8 @@ class Recording {
     this.speakers,
     required this.summaryItems,
     required this.createdAt,
+    this.labeledTexts = const [],
+    this.dialogues = const [], // ★ 기본값 추가
   });
 
   Recording copyWith({
@@ -27,6 +31,8 @@ class Recording {
     List<Map<String, dynamic>>? speakers,
     List<SummaryItem>? summaryItems,
     DateTime? createdAt,
+    List<String>? labeledTexts,
+    List<Map<String, dynamic>>? dialogues, // ★ 추가
   }) {
     return Recording(
       audioPath: audioPath ?? this.audioPath,
@@ -35,6 +41,8 @@ class Recording {
       speakers: speakers ?? this.speakers,
       summaryItems: summaryItems ?? this.summaryItems,
       createdAt: createdAt ?? this.createdAt,
+      labeledTexts: labeledTexts ?? this.labeledTexts,
+      dialogues: dialogues ?? this.dialogues, // ★ 추가
     );
   }
 
@@ -56,6 +64,17 @@ class Recording {
         ? rawSpeakers.whereType<Map<String, dynamic>>().toList()
         : null;
 
+    final rawLabeledTexts = map['labeledTexts'];
+    final parsedLabeledTexts = (rawLabeledTexts is List)
+        ? rawLabeledTexts.map((e) => e.toString()).toList()
+        : <String>[];
+
+    // ★ dialogues 파싱
+    final rawDialogues = map['dialogues'];
+    final parsedDialogues = (rawDialogues is List)
+        ? rawDialogues.whereType<Map<String, dynamic>>().toList()
+        : <Map<String, dynamic>>[];
+
     return Recording(
       audioPath: map['audioPath'] as String? ?? '',
       patientName: map['patientName'] as String? ?? 'unknown',
@@ -63,6 +82,8 @@ class Recording {
       speakers: parsedSpeakers,
       summaryItems: items,
       createdAt: parsedDate,
+      labeledTexts: parsedLabeledTexts,
+      dialogues: parsedDialogues, // ★ 추가
     );
   }
 
@@ -73,5 +94,7 @@ class Recording {
         'createdAt': createdAt.toIso8601String(),
         'summaryItems': summaryItems.map((e) => e.toJson()).toList(),
         'speakers': speakers,
+        'labeledTexts': labeledTexts,
+        'dialogues': dialogues, // ★ 추가
       };
 }
