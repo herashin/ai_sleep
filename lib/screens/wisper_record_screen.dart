@@ -13,7 +13,6 @@ import '../services/gpt_service.dart';
 import '../widgets/permission_gate.dart';
 import 'result_screen.dart';
 
-import 'package:http/http.dart' as http;
 import 'package:ffmpeg_kit_flutter_new/ffmpeg_kit.dart';
 import 'package:ffmpeg_kit_flutter_new/return_code.dart';
 
@@ -187,7 +186,7 @@ class RecordScreenState extends State<RecordScreen> {
   }
 
   Future<String> _convertAudioFormat(String inputPath) async {
-    final outputPath = inputPath.replaceAll(RegExp(r'\.\w+\$'), '.wav');
+    final outputPath = inputPath.replaceAll(RegExp(r'\.\w+$'), '.wav');
     final command = '-i "$inputPath" -ar 16000 -ac 1 "$outputPath"';
 
     final session = await FFmpegKit.execute(command);
@@ -207,7 +206,7 @@ class RecordScreenState extends State<RecordScreen> {
       final convertedPath = await _convertAudioFormat(file.path);
       final convertedFile = File(convertedPath);
 
-      // 2) STT + Diarize API 호출
+      // 2) STT + Diarize API 호출 (Docker 백엔드)
       final rawJson =
           await _sttService.transcribeAudioWithSegments(convertedFile);
       if (rawJson == null) throw Exception('음성 인식 실패');
@@ -314,7 +313,8 @@ class RecordScreenState extends State<RecordScreen> {
                     ? const SizedBox(
                         width: 24,
                         height: 24,
-                        child: CircularProgressIndicator(color: Colors.white))
+                        child: CircularProgressIndicator(color: Colors.white),
+                      )
                     : Text(_isRecording ? '녹음 중지' : '녹음 시작'),
               ),
               if (_filePath != null) ...[

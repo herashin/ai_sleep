@@ -29,7 +29,7 @@ class _HomeScreenState extends State<HomeScreen> {
     if (granted) {
       Navigator.push(
         context,
-        MaterialPageRoute(builder: (_) => const RecordScreen()),
+        MaterialPageRoute(builder: (_) => const WhisperRecordScreen()),
       );
     } else {
       if (!mounted) return;
