@@ -3,112 +3,56 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_sound/flutter_sound.dart';
-import 'package:permission_handler/permission_handler.dart';
-import 'package:device_info_plus/device_info_plus.dart';
 
 import '../models/recording.dart';
 import '../models/summary_item.dart';
 import '../services/stt_service.dart';
 import '../services/gpt_service.dart';
 import '../widgets/permission_gate.dart';
+import '../widgets/recording_control.dart';
+import '../widgets/recording_timer.dart';
+import '../widgets/file_info_display.dart';
+import '../widgets/dialogues_list.dart';
+import '../utils/logger.dart';
 import 'result_screen.dart';
-
 import 'package:ffmpeg_kit_flutter_new/ffmpeg_kit.dart';
 import 'package:ffmpeg_kit_flutter_new/return_code.dart';
 
-class PermissionHelper {
-  bool _requestInProgress = false;
-
-  Future<bool> checkAndRequestPermissions({
-    bool requireMicrophone = false,
-    bool requireStorage = false,
-  }) async {
-    if (_requestInProgress) return false;
-    _requestInProgress = true;
-
-    if (requireMicrophone) {
-      var micStatus = await Permission.microphone.status;
-      if (!micStatus.isGranted) {
-        micStatus = await Permission.microphone.request();
-        if (!micStatus.isGranted) {
-          _requestInProgress = false;
-          return false;
-        }
-      }
-    }
-
-    if (requireStorage) {
-      final granted = await _requestStoragePermission();
-      if (!granted) {
-        _requestInProgress = false;
-        return false;
-      }
-    }
-
-    _requestInProgress = false;
-    return true;
-  }
-
-  Future<bool> _requestStoragePermission() async {
-    if (!Platform.isAndroid) return true;
-    final androidInfo = await DeviceInfoPlugin().androidInfo;
-    final sdk = androidInfo.version.sdkInt;
-
-    if (sdk >= 30) {
-      var status = await Permission.manageExternalStorage.status;
-      if (!status.isGranted) {
-        status = await Permission.manageExternalStorage.request();
-      }
-      return status.isGranted;
-    } else {
-      final status = await Permission.storage.request();
-      return status.isGranted;
-    }
-  }
-}
-
-class RecordScreen extends StatefulWidget {
-  const RecordScreen({Key? key}) : super(key: key);
+class WhisperRecordScreen extends StatefulWidget {
+  const WhisperRecordScreen({Key? key}) : super(key: key);
 
   @override
-  RecordScreenState createState() => RecordScreenState();
+  WhisperRecordScreenState createState() => WhisperRecordScreenState();
 }
 
-class RecordScreenState extends State<RecordScreen> {
+class WhisperRecordScreenState extends State<WhisperRecordScreen> {
   final FlutterSoundRecorder _recorder = FlutterSoundRecorder();
   final STTService _sttService = STTService();
   final GPTService _gptService = GPTService();
-  final PermissionHelper _permissionHelper = PermissionHelper();
-
-  StreamSubscription? _recorderSub;
-  Timer? _timer;
-  int _elapsedMs = 0;
   bool _isRecording = false;
   bool _isLoading = false;
   bool _recorderReady = false;
+  int _selectedSpeakers = 2;
+  int _elapsedMs = 0;
   String? _filePath;
-
   List<Map<String, dynamic>> _dialogues = [];
+  StreamSubscription? _recorderSub;
+  Timer? _timer;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) async {
-      await _checkPermissionsAndRedirect();
-      await _initRecorder();
-    });
+    _initLogger();
+    _initRecorder();
   }
 
-  Future<void> _checkPermissionsAndRedirect() async {
-    final microphoneStatus = await Permission.microphone.status;
-    final storageStatus = await Permission.manageExternalStorage.status;
-
-    if (!microphoneStatus.isGranted || !storageStatus.isGranted) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('권한이 없으면 녹음 기능을 사용할 수 없습니다.')),
-      );
-      Navigator.of(context).pop();
+  Future<void> _initLogger() async {
+    try {
+      await Logger().init();
+      await Logger().log('WhisperRecordScreen 진입, 로그파일 초기화');
+      print('Logger 초기화 완료');
+    } catch (e) {
+      print('Logger 초기화 실패: $e');
     }
   }
 
@@ -118,139 +62,149 @@ class RecordScreenState extends State<RecordScreen> {
     _recorderSub = _recorder.onProgress?.listen((event) {
       if (mounted) setState(() => _elapsedMs = event.duration.inMilliseconds);
     });
-    if (!mounted) return;
-    setState(() => _recorderReady = true);
+    if (mounted) setState(() => _recorderReady = true);
+    print('녹음기 준비 완료');
   }
 
   Future<void> _toggleRecording() async {
     if (_isLoading || !_recorderReady) return;
-
-    bool granted = await _permissionHelper.checkAndRequestPermissions(
-      requireMicrophone: true,
-      requireStorage: true,
-    );
-    if (!granted) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('필요한 권한이 허용되어야 합니다.')),
-      );
-      return;
-    }
-
+    setState(() => _isRecording = !_isRecording);
     if (_isRecording) {
-      _timer?.cancel();
-      final tempPath = await _recorder.stopRecorder();
-      await Future.delayed(const Duration(milliseconds: 100));
-      if (tempPath == null) return;
-      final file = File(tempPath);
-      if (!file.existsSync()) return;
-
-      setState(() {
-        _isRecording = false;
-        _filePath = tempPath;
-      });
-      await _processRecording(file);
+      await _startRecording();
     } else {
-      setState(() {
-        _isRecording = true;
-        _elapsedMs = 0;
-        _filePath = null;
-        _dialogues = [];
-      });
-
-      final dir = Directory('/storage/emulated/0/AI_Sleep');
-      if (!dir.existsSync()) dir.createSync(recursive: true);
-      final outPath =
-          '${dir.path}/consult_${DateTime.now().millisecondsSinceEpoch}.m4a';
-
-      try {
-        await _recorder.startRecorder(
-          toFile: outPath,
-          codec: Codec.aacMP4,
-          sampleRate: 16000,
-          numChannels: 1,
-        );
-        _timer = Timer.periodic(const Duration(milliseconds: 100), (t) {
-          if (!_isRecording) {
-            t.cancel();
-            return;
-          }
-          if (mounted) setState(() => _elapsedMs += 100);
-        });
-      } catch (e) {
-        setState(() => _isRecording = false);
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('녹음 실패: $e')));
-      }
+      await _stopRecording();
     }
   }
 
-  Future<String> _convertAudioFormat(String inputPath) async {
-    final outputPath = inputPath.replaceAll(RegExp(r'\.\w+$'), '.wav');
-    final command = '-i "$inputPath" -ar 16000 -ac 1 "$outputPath"';
+  Future<void> _startRecording() async {
+    final dir = Directory('/storage/emulated/0/AI_Sleep');
+    if (!dir.existsSync()) dir.createSync(recursive: true);
+    final outPath =
+        '${dir.path}/whisper_${DateTime.now().millisecondsSinceEpoch}.m4a';
+    await Logger().log('녹음 시작: $outPath');
+    print('녹음 시작: $outPath');
+    await _recorder.startRecorder(
+      toFile: outPath,
+      codec: Codec.aacMP4,
+      sampleRate: 16000,
+      numChannels: 1,
+    );
+    _timer = Timer.periodic(const Duration(milliseconds: 100), (t) {
+      if (!_isRecording) t.cancel();
+      if (mounted) setState(() => _elapsedMs += 100);
+    });
+  }
 
+  Future<void> _stopRecording() async {
+    _timer?.cancel();
+    final path = await _recorder.stopRecorder();
+    if (path != null) {
+      setState(() => _filePath = path);
+      await Logger().log('녹음 종료: $path');
+      print('녹음 종료: $path');
+      final f = File(path);
+      final bytes = await f.length();
+      print('녹음된 파일 크기: $bytes bytes');
+      await Logger().log('녹음된 파일 크기: $bytes bytes');
+    }
+    await _processRecording();
+  }
+
+  Future<String> _convertAndSend(String path) async {
+    final outputPath = path.replaceAll(RegExp(r'\.\w+$'), '.wav');
+    final command = '-y -i "$path" -ar 16000 -ac 1 "$outputPath"';
+    await Logger().log('FFmpeg 변환 시작: $command');
+    print('FFmpeg 변환 시작: $command');
     final session = await FFmpegKit.execute(command);
     final returnCode = await session.getReturnCode();
 
     if (ReturnCode.isSuccess(returnCode)) {
+      await Logger().log('FFmpeg 변환 성공: $outputPath');
+      print('FFmpeg 변환 성공: $outputPath');
+      final f = File(outputPath);
+      final bytes = await f.length();
+      print('변환된 WAV 파일 크기: $bytes bytes');
+      await Logger().log('변환된 WAV 파일 크기: $bytes bytes');
       return outputPath;
     } else {
-      throw Exception('FFmpeg 변환 실패 코드: $returnCode');
+      await Logger().log('FFmpeg 변환 실패: $returnCode');
+      print('FFmpeg 변환 실패: $returnCode');
+      throw Exception('FFmpeg 변환 실패: $returnCode');
     }
   }
 
-  Future<void> _processRecording(File file) async {
+  Future<void> _processRecording() async {
+    if (_filePath == null) return;
     setState(() => _isLoading = true);
     try {
-      // 1) FFmpeg 변환
-      final convertedPath = await _convertAudioFormat(file.path);
-      final convertedFile = File(convertedPath);
+      await Logger().log('녹음 파일 처리 시작: $_filePath');
+      print('녹음 파일 처리 시작: $_filePath');
+      final processedPath = await _convertAndSend(_filePath!);
+      final file = File(processedPath);
 
-      // 2) STT + Diarize API 호출 (Docker 백엔드)
-      final rawJson =
-          await _sttService.transcribeAudioWithSegments(convertedFile);
-      if (rawJson == null) throw Exception('음성 인식 실패');
+      // 디버깅: 업로드할 파일 크기
+      final bytes = await file.length();
+      print('서버로 전송할 파일: $processedPath, 크기: $bytes bytes');
+      await Logger().log('서버로 전송할 파일: $processedPath, 크기: $bytes bytes');
 
-      // 3) 서버가 돌려준 dialogues 사용
+      // 1) STT + Diarize
+      print('[API 요청] 화자수: $_selectedSpeakers');
+      await Logger().log('[API 요청] 화자수: $_selectedSpeakers');
+      final rawJson = await _sttService.transcribeAudioWithSegments(
+        file,
+        minSpeakers: _selectedSpeakers,
+        maxSpeakers: _selectedSpeakers,
+      );
+      if (rawJson == null) {
+        print('❌ STT API 응답 없음 (null)');
+        throw Exception('음성 인식 실패');
+      }
+      print('STT+화자분리 API 결과: $rawJson');
+      await Logger().log(
+          'STT+화자분리 완료, 텍스트: ${rawJson['text']?.substring(0, 20) ?? ""}...');
+
       final serverDialogues =
           (rawJson['dialogues'] as List).cast<Map<String, dynamic>>();
-      setState(() {
-        _dialogues = serverDialogues;
-      });
+      setState(() => _dialogues = serverDialogues);
 
-      // 4) GPT 요약
+      // 2) 요약 및 환자명 추출
       final summary =
           await _gptService.summarizeText(rawJson['text'] as String);
-      if (summary == null) throw Exception('GPT 요약 실패');
+      if (summary == null || summary is! String || summary.trim().isEmpty) {
+        print('❌ GPT 요약이 null, empty 또는 String이 아님: $summary');
+        await Logger().log('❌ GPT 요약이 null, empty 또는 String이 아님: $summary');
+        throw Exception('요약 실패: GPT 요약이 null 또는 잘못된 값');
+      }
+      await Logger().log('GPT 요약 완료: $summary');
+      final summaryLines =
+          summary.split('\n').where((l) => l.trim().isNotEmpty).toList();
+      final summaryItems =
+          summaryLines.map((l) => SummaryItem(iconCode: '', text: l)).toList();
 
-      // 5) 환자명 추출, 파일 이동 및 메타 저장
       final nameRaw =
           await _gptService.extractPatientName(rawJson['text'] as String);
       final patientName =
           (nameRaw?.replaceAll(RegExp(r'[^가-힣a-zA-Z0-9]'), '_') ?? 'unknown')
               .trim();
-      final dir = Directory('/storage/emulated/0/AI_Sleep');
-      final base =
-          'consult_${patientName}_${DateTime.now().millisecondsSinceEpoch}';
-      final audioPath = '${dir.path}/$base.m4a';
-      final metaPath = '${dir.path}/$base.json';
+      print('환자명 추출: $patientName');
 
-      await file.rename(audioPath);
+      // ====== 환자명 기반 파일명 생성 및 파일명 변경 ======
+      final dir = file.parent.path;
+      final nowTs = DateTime.now().millisecondsSinceEpoch;
+      final ext = file.path.split('.').last;
+      final newAudioPath = '$dir/${patientName}_$nowTs.$ext';
+      await file.rename(newAudioPath);
+      print('녹음파일 이름 변경: $newAudioPath');
+      await Logger().log('녹음파일 이름 변경: $newAudioPath');
 
-      final lines = summary
-          .split('\n')
-          .map((l) => l.trim())
-          .where((l) => l.isNotEmpty)
-          .toList();
-      final summaryItems =
-          lines.map((l) => SummaryItem(iconCode: '', text: l)).toList();
-
+      // 3) 메타 저장 및 화면 이동
+      // Recording 객체 생성 (audioPath, patientName 모두 반영)
       final rec = Recording(
-        audioPath: audioPath,
+        audioPath: newAudioPath,
+        patientName: patientName,
         originalText: rawJson['text'] as String,
         summaryItems: summaryItems,
         createdAt: DateTime.now(),
-        patientName: patientName,
         speakers: serverDialogues
             .map((d) => {
                   'speaker': d['speaker'],
@@ -258,22 +212,25 @@ class RecordScreenState extends State<RecordScreen> {
                   'end': d['end'],
                 })
             .toList(),
+        labeledTexts: [], // 필요에 따라
         dialogues: serverDialogues,
       );
 
-      await File(metaPath)
-          .writeAsString(jsonEncode(rec.toJson()), encoding: utf8);
+      await _saveMetaFile(rec); // 메타파일도 자동 환자명 기반으로 저장됨
 
-      if (!mounted) return;
+      await Logger().log('메타 저장 및 화면 이동: ${newAudioPath}');
+      print('메타 저장: ${newAudioPath.replaceAll(RegExp(r'\.\w+$'), '.json')}');
+
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(builder: (_) => ResultScreen(initialRecording: rec)),
       );
-    } catch (e) {
-      if (mounted) {
+    } catch (e, st) {
+      await Logger().log('오류 발생: $e\n$st');
+      print('오류 발생: $e\n$st');
+      if (mounted)
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text('오류: $e')));
-      }
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -293,58 +250,58 @@ class RecordScreenState extends State<RecordScreen> {
       requireMicrophone: true,
       requireStorage: true,
       child: Scaffold(
-        appBar: AppBar(title: const Text('상담 녹음')),
+        appBar: AppBar(title: const Text('Whisper 녹음')),
         body: Center(
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(
-                _isRecording ? Icons.mic : Icons.mic_none,
-                size: 80,
-                color: _isRecording ? Colors.red : Colors.grey,
+              RecordingControl(
+                isRecording: _isRecording,
+                isLoading: _isLoading,
+                onPressed: _toggleRecording,
               ),
               const SizedBox(height: 12),
-              Text('녹음 시간: ${(_elapsedMs / 1000).toStringAsFixed(1)}초'),
-              const SizedBox(height: 20),
-              ElevatedButton(
-                onPressed:
-                    (_isLoading || !_recorderReady) ? null : _toggleRecording,
-                child: _isLoading
-                    ? const SizedBox(
-                        width: 24,
-                        height: 24,
-                        child: CircularProgressIndicator(color: Colors.white),
-                      )
-                    : Text(_isRecording ? '녹음 중지' : '녹음 시작'),
-              ),
+              RecordingTimer(elapsedMs: _elapsedMs),
               if (_filePath != null) ...[
                 const SizedBox(height: 12),
-                Text('파일 저장: $_filePath', textAlign: TextAlign.center),
+                FileInfoDisplay(filePath: _filePath!),
               ],
+              const SizedBox(height: 20),
+              const Text("화자 수 설정",
+                  style: TextStyle(fontWeight: FontWeight.bold)),
+              DropdownButton<int>(
+                value: _selectedSpeakers,
+                items: [1, 2, 3, 4]
+                    .map((v) => DropdownMenuItem(value: v, child: Text('$v명')))
+                    .toList(),
+                onChanged: (v) {
+                  if (v != null) setState(() => _selectedSpeakers = v);
+                },
+              ),
               if (_dialogues.isNotEmpty) ...[
                 const SizedBox(height: 20),
-                Text('화자별 대화 내용',
+                const Text('화자별 대화 내용',
                     style: TextStyle(fontWeight: FontWeight.bold)),
-                SizedBox(
-                  height: 200,
-                  child: ListView.builder(
-                    shrinkWrap: true,
-                    itemCount: _dialogues.length,
-                    itemBuilder: (context, index) {
-                      final d = _dialogues[index];
-                      return ListTile(
-                        title: Text('[${d["speaker"]}] ${d["text"]}'),
-                        subtitle: Text(
-                            '(${d["start"].toStringAsFixed(2)}~${d["end"].toStringAsFixed(2)}초)'),
-                      );
-                    },
-                  ),
-                ),
+                DialoguesList(dialogues: _dialogues),
               ],
             ],
           ),
         ),
       ),
     );
+  }
+}
+
+Future<void> _saveMetaFile(Recording rec) async {
+  final metaPath = rec.audioPath.replaceAll(RegExp(r'\.\w+$'), '.json');
+  try {
+    await File(metaPath)
+        .writeAsString(jsonEncode(rec.toJson()), encoding: utf8);
+    print('메타파일 저장됨: $metaPath');
+    await Logger().log('메타파일 저장됨: $metaPath');
+  } catch (e, st) {
+    print('메타파일 저장 오류: $e\n$st');
+    await Logger().log('메타파일 저장 오류: $e\n$st');
+    // 토스트, 에러 알림 등 사용자 안내
   }
 }

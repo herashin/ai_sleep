@@ -88,7 +88,7 @@ class Recording {
       summaryItems: items,
       createdAt: parsedDate,
       labeledTexts: parsedLabeledTexts,
-      dialogues: parsedDialogues, // 여기로 넘겨줍니다
+      dialogues: parsedDialogues,
     );
   }
   Map<String, dynamic> toJson() => {

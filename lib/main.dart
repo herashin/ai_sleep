@@ -1,6 +1,6 @@
 // Flutter main entry point
 // lib/main.dart
-
+// ai_sleep
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'screens/home_screen.dart';
@@ -8,7 +8,7 @@ import 'screens/pin_lock_screen.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 Future<void> main() async {
-  // .env 로드
+  WidgetsFlutterBinding.ensureInitialized();
   await dotenv.load();
   runApp(const SleepVoiceApp());
 }

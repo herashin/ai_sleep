@@ -28,7 +28,7 @@ class StatusHandler extends StatelessWidget {
       return loadingWidget ?? const Center(child: CircularProgressIndicator());
     }
     if (error != null) {
-      return Center(child: Text('에러 발생: \$error'));
+      return Center(child: Text('에러 발생: $error'));
     }
     if (isEmpty) {
       return emptyBuilder(context);

@@ -40,7 +40,7 @@ class _ResultScreenState extends State<ResultScreen> {
     });
 
     // 2) JSON 파일에 덮어쓰기
-    final metaPath = rec.audioPath.replaceAll('.m4a', '.json');
+    final metaPath = rec.audioPath.replaceAll('.wav', '.json');
     final file = File(metaPath);
 
     // toJson() 기존 구조 유지 + originalText 갱신
