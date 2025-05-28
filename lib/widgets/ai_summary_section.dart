@@ -4,12 +4,14 @@ import 'summary_section.dart';
 
 class AISummarySection extends StatelessWidget {
   final List<SummaryItem> items;
-  final VoidCallback onRefresh;
+  final VoidCallback? onRefresh;
+  final bool isLoading;
 
   const AISummarySection({
     Key? key,
     required this.items,
     required this.onRefresh,
+    required this.isLoading,
   }) : super(key: key);
 
   @override
@@ -17,7 +19,6 @@ class AISummarySection extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // 1) Row 로 감싸서 텍스트와 버튼을 같은 줄에 배치
         Row(
           children: [
             const Text(
@@ -27,16 +28,31 @@ class AISummarySection extends StatelessWidget {
                 fontSize: 16,
               ),
             ),
-            const Spacer(), // 텍스트와 버튼 사이 빈 공간
+            const Spacer(),
             TextButton(
-              onPressed: onRefresh,
+              onPressed: isLoading ? null : onRefresh,
               style: TextButton.styleFrom(
                 padding:
                     const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
               ),
-              child: const Text(
-                'AI 요약 갱신',
-                style: TextStyle(fontSize: 14),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    isLoading ? '갱신중...' : 'AI 요약 갱신',
+                    style: const TextStyle(fontSize: 14),
+                  ),
+                  if (isLoading) ...[
+                    const SizedBox(width: 8),
+                    const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2.2,
+                      ),
+                    ),
+                  ],
+                ],
               ),
             ),
           ],

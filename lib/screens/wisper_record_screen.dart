@@ -38,6 +38,7 @@ class WhisperRecordScreenState extends State<WhisperRecordScreen> {
   List<Map<String, dynamic>> _dialogues = [];
   StreamSubscription? _recorderSub;
   Timer? _timer;
+  String? _loadingMessage; // 로딩스피너 상태문구
 
   @override
   void initState() {
@@ -135,7 +136,10 @@ class WhisperRecordScreenState extends State<WhisperRecordScreen> {
 
   Future<void> _processRecording() async {
     if (_filePath == null) return;
-    setState(() => _isLoading = true);
+    setState(() {
+      _isLoading = true;
+      _loadingMessage = '대화내용 분석중';
+    });
     try {
       await Logger().log('녹음 파일 처리 시작: $_filePath');
       print('녹음 파일 처리 시작: $_filePath');
@@ -155,6 +159,11 @@ class WhisperRecordScreenState extends State<WhisperRecordScreen> {
         minSpeakers: _selectedSpeakers,
         maxSpeakers: _selectedSpeakers,
       );
+      // ... STT 처리 끝나고 요약 요청 직전 메시지 변경!
+      setState(() {
+        _loadingMessage = '대화내용 요약중';
+      });
+
       if (rawJson == null) {
         print('❌ STT API 응답 없음 (null)');
         throw Exception('음성 인식 실패');
@@ -232,7 +241,11 @@ class WhisperRecordScreenState extends State<WhisperRecordScreen> {
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text('오류: $e')));
     } finally {
-      if (mounted) setState(() => _isLoading = false);
+      if (mounted)
+        setState(() {
+          _isLoading = false;
+          _loadingMessage = null;
+        });
     }
   }
 
@@ -259,6 +272,7 @@ class WhisperRecordScreenState extends State<WhisperRecordScreen> {
                 isRecording: _isRecording,
                 isLoading: _isLoading,
                 onPressed: _toggleRecording,
+                loadingMessage: _loadingMessage,
               ),
               const SizedBox(height: 12),
               RecordingTimer(elapsedMs: _elapsedMs),

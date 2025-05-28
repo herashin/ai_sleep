@@ -35,7 +35,7 @@ class GPTService {
     try {
       final response = await http
           .post(uri, headers: headers, body: body)
-          .timeout(const Duration(seconds: 15));
+          .timeout(const Duration(seconds: 60));
 
       if (response.statusCode != 200) {
         print('GPT API 오류 (${response.statusCode}): ${response.body}');
@@ -67,6 +67,7 @@ $inputText
 [1f4b0] 예상 비용: 약 50만 원
 [1f5d3] 다음 예약일: 2025년 5월 20일
 
+- 반드시 각 줄의 시작에 [이모지 코드]가 들어가야 합니다.
 - 줄바꿈(\n)만 사용하세요.
 - 다른 설명은 추가하지 마세요.
 ''';
